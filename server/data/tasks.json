@@ -1,0 +1,60 @@
+{
+  "tasks": [
+    {
+      "id": "task_bootsem_docs",
+      "title": "整理 BootSem 文档",
+      "note": "给 juniors 的说明材料，重点写清楚系统启动优化流程和注意事项。",
+      "status": "todo",
+      "due_date": "2026-07-06",
+      "due_time": "14:00",
+      "project": "BootSem",
+      "priority": "normal",
+      "created_at": "2026-07-06T08:00:00+08:00",
+      "updated_at": "2026-07-06T08:10:00+08:00",
+      "completed_at": null,
+      "source": "agent"
+    },
+    {
+      "id": "task_research_paper",
+      "title": "看盐构造 DEM 论文",
+      "note": "关注物理实验可复现的相似现象。",
+      "status": "todo",
+      "due_date": "2026-07-06",
+      "due_time": "20:00",
+      "project": "Research",
+      "priority": "normal",
+      "created_at": "2026-07-06T08:05:00+08:00",
+      "updated_at": "2026-07-06T08:05:00+08:00",
+      "completed_at": null,
+      "source": "agent"
+    },
+    {
+      "id": "task_week_submit",
+      "title": "周五前提交材料",
+      "note": "检查文档、数据、截图是否一致。",
+      "status": "todo",
+      "due_date": "2026-07-10",
+      "due_time": null,
+      "project": "BootSem",
+      "priority": "high",
+      "created_at": "2026-07-06T08:06:00+08:00",
+      "updated_at": "2026-07-06T08:06:00+08:00",
+      "completed_at": null,
+      "source": "agent"
+    },
+    {
+      "id": "task_read_book",
+      "title": "读完某本书",
+      "note": "以后任务示例。",
+      "status": "todo",
+      "due_date": "2026-07-20",
+      "due_time": null,
+      "project": "Reading",
+      "priority": "normal",
+      "created_at": "2026-07-06T08:07:00+08:00",
+      "updated_at": "2026-07-06T08:07:00+08:00",
+      "completed_at": null,
+      "source": "agent"
+    }
+  ]
+}

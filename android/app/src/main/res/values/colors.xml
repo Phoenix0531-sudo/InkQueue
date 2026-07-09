@@ -1,0 +1,6 @@
+<resources>
+    <color name="ink_background">#FFFFFF</color>
+    <color name="ink_text">#000000</color>
+    <color name="ink_secondary">#333333</color>
+    <color name="ink_line">#000000</color>
+</resources>

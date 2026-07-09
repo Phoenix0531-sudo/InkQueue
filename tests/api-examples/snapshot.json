@@ -1,0 +1,19 @@
+{
+  "server_time": "2026-07-06T08:12:00+08:00",
+  "tasks": [
+    {
+      "id": "task_bootsem_docs",
+      "title": "整理 BootSem 文档",
+      "note": "给 juniors 的说明材料，重点写清楚系统启动优化流程和注意事项。",
+      "status": "todo",
+      "due_date": "2026-07-06",
+      "due_time": "14:00",
+      "project": "BootSem",
+      "priority": "normal",
+      "created_at": "2026-07-06T08:00:00+08:00",
+      "updated_at": "2026-07-06T08:10:00+08:00",
+      "completed_at": null,
+      "source": "agent"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "inkqueue-reference-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reference JSON-file API server for InkQueue v0.1",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

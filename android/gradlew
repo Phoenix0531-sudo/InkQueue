@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+GRADLE_VERSION="8.9"
+GRADLE_DIR="$ROOT_DIR/.tools/gradle-$GRADLE_VERSION"
+GRADLE_ZIP="$ROOT_DIR/.tools/downloads/gradle-$GRADLE_VERSION-bin.zip"
+if [ ! -x "$ROOT_DIR/.tools/jdk/bin/java.exe" ] && [ -z "${JAVA_HOME:-}" ]; then
+  echo "InkQueue: JDK not found. Expected $ROOT_DIR/.tools/jdk or JAVA_HOME." >&2
+  exit 1
+fi
+export JAVA_HOME="${JAVA_HOME:-$ROOT_DIR/.tools/jdk}"
+export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ROOT_DIR/.tools/android-sdk}"
+export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+if [ ! -x "$GRADLE_DIR/bin/gradle" ]; then
+  mkdir -p "$ROOT_DIR/.tools/downloads"
+  if [ ! -f "$GRADLE_ZIP" ]; then
+    echo "InkQueue: downloading Gradle $GRADLE_VERSION..." >&2
+    curl -L --fail --retry 3 -o "$GRADLE_ZIP" "https://services.gradle.org/distributions/gradle-$GRADLE_VERSION-bin.zip"
+  fi
+  rm -rf "$GRADLE_DIR"
+  unzip -q "$GRADLE_ZIP" -d "$ROOT_DIR/.tools"
+fi
+exec "$GRADLE_DIR/bin/gradle" "$@"

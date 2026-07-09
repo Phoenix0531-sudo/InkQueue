@@ -1,0 +1,12 @@
+# InkQueue local toolchain and build outputs
+.tools/
+.gradle/
+build/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+server/node_modules/
+server/data/*.tmp
+*.log
+.DS_Store
