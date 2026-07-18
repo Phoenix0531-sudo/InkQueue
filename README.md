@@ -164,8 +164,8 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 本机已构建出的 APK：
 
-- 大小：`34908` bytes
-- SHA-256：`000688b9812fbba8cc6dbc9d5f1057c35485be1b8089bfbe9e301c1fcb9b8c64`
+- 大小：`36808` bytes
+- SHA-256：`a8f9129bdda134d1bbb5b688c802360407848933dda5048cb6ac5dc4ca35f539`
 
 ## 安装到设备
 

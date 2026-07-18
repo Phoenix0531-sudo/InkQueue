@@ -1,13 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Board: white rounded rectangle with black border -->
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#FFFFFF" />
-            <stroke android:width="2dp" android:color="#000000" />
+            <solid android:color="#FFFFFF"/>
+            <stroke android:width="2dp" android:color="#000000"/>
+            <corners android:radius="4dp"/>
         </shape>
     </item>
-    <item android:left="10dp" android:right="10dp" android:top="14dp" android:bottom="14dp">
+    <!-- List item line 1 -->
+    <item android:top="9dp" android:left="8dp" android:right="8dp" android:bottom="36dp">
         <shape android:shape="rectangle">
-            <solid android:color="#000000" />
+            <solid android:color="#000000"/>
+        </shape>
+    </item>
+    <!-- List item line 2 -->
+    <item android:top="17dp" android:left="8dp" android:right="8dp" android:bottom="28dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#000000"/>
+        </shape>
+    </item>
+    <!-- Checkmark gap on line 2 -->
+    <item android:top="18dp" android:left="29dp" android:right="20dp" android:bottom="30dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#FFFFFF"/>
+        </shape>
+    </item>
+    <!-- Checkmark short stroke -->
+    <item android:top="19dp" android:left="30dp" android:right="21dp" android:bottom="31dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#000000"/>
+        </shape>
+    </item>
+    <!-- List item line 3 (shorter) -->
+    <item android:top="25dp" android:left="8dp" android:right="14dp" android:bottom="20dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#000000"/>
         </shape>
     </item>
 </layer-list>

@@ -43,7 +43,7 @@ public class DateUtilsTest {
             @Override public String getDueTime() { return "14:00"; }
         };
 
-        assertEquals("2026-02-31 14:00", DateUtils.displayDue(task, "2026-07-06"));
+        assertEquals("2026-02-31", DateUtils.displayDue(task, "2026-07-06"));
     }
 
     @Test public void malformedDateDoesNotCountAsTodayOrThisWeek() {

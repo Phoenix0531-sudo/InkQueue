@@ -33,59 +33,70 @@ public class SettingsActivity extends Activity {
     private View buildLayout() {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.WHITE);
+        scroll.setBackgroundColor(Color.BLACK);
+        scroll.setPadding(dp(16), dp(12), dp(16), dp(14));
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(14), dp(18), dp(18));
-        scroll.addView(root);
+        root.setBackgroundColor(Color.BLACK);
 
-        TextView title = label("设置", 22, true);
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishPlain(); } });
+        TextView backLink = new TextView(this);
+        backLink.setText("< TODOLIST");
+        backLink.setTextColor(0xffcccccc);
+        backLink.setTextSize(11);
+        top.addView(backLink);
+        root.addView(top);
+        addSpace(root, 16);
+
+        TextView title = new TextView(this);
+        title.setText("settings");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(18);
         root.addView(title);
+        addSpace(root, 8);
+
         baseUrl = input(prefs.getString(SyncService.KEY_API_BASE_URL, SyncService.DEFAULT_API_BASE_URL));
         token = input(prefs.getString(SyncService.KEY_TOKEN, SyncService.DEFAULT_TOKEN));
         deviceId = input(prefs.getString(SyncService.KEY_DEVICE_ID, SyncService.DEFAULT_DEVICE_ID));
-        addField(root, "API 地址", baseUrl);
+        addField(root, "API url", baseUrl);
         addField(root, "Token", token);
-        addField(root, "设备 ID", deviceId);
-        root.addView(action("保存", new View.OnClickListener() { @Override public void onClick(View v) { save(); }}));
-        root.addView(action("返回", new View.OnClickListener() { @Override public void onClick(View v) { finishPlain(); }}));
+        addField(root, "device ID", deviceId);
+
+        addSpace(root, 10);
+        root.addView(action("save", new View.OnClickListener() { @Override public void onClick(View v) { save(); } }));
+        View s1 = new View(this); s1.setBackgroundColor(0xff555555);
+        root.addView(s1, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
+        root.addView(action("back", new View.OnClickListener() { @Override public void onClick(View v) { finishPlain(); } }));
+
+        scroll.addView(root);
         return scroll;
     }
 
     private void addField(LinearLayout root, String name, EditText field) {
-        TextView label = label(name, 16, true);
-        label.setPadding(0, dp(18), 0, dp(6));
+        TextView label = new TextView(this); label.setText(name); label.setTextColor(0xffcccccc);
+        label.setTextSize(12); label.setPadding(0, dp(12), 0, dp(2));
         root.addView(label);
-        root.addView(field, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)));
+        root.addView(field, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
     }
 
     private EditText input(String value) {
         EditText edit = new EditText(this);
         edit.setText(value);
-        edit.setTextSize(16);
-        edit.setTextColor(Color.BLACK);
+        edit.setTextSize(13);
+        edit.setTextColor(Color.WHITE);
         edit.setSingleLine(true);
         edit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        edit.setPadding(dp(8), 0, dp(8), 0);
-        edit.setBackgroundColor(Color.WHITE);
+        edit.setPadding(dp(6), 0, dp(6), 0);
+        edit.setBackgroundColor(0xff1a1a1a);
         return edit;
     }
 
     private TextView action(String text, View.OnClickListener listener) {
-        TextView view = label(text, 18, false);
-        view.setGravity(Gravity.CENTER_VERTICAL);
-        view.setMinHeight(dp(56));
-        view.setOnClickListener(listener);
-        return view;
-    }
-
-    private TextView label(String text, int sp, boolean bold) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextSize(sp);
-        view.setTextColor(Color.BLACK);
-        if (bold) view.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        return view;
+        TextView v = new TextView(this); v.setText("  " + text); v.setTextColor(Color.WHITE);
+        v.setTextSize(13); v.setGravity(Gravity.CENTER_VERTICAL); v.setMinHeight(dp(46)); v.setOnClickListener(listener);
+        return v;
     }
 
     private void save() {
@@ -94,18 +105,12 @@ public class SettingsActivity extends Activity {
                 .putString(SyncService.KEY_TOKEN, token.getText().toString().trim())
                 .putString(SyncService.KEY_DEVICE_ID, deviceId.getText().toString().trim())
                 .apply();
-        Intent data = new Intent();
-        data.putExtra("message", "设置已保存");
-        setResult(RESULT_OK, data);
+        Intent d = new Intent(); d.putExtra("message", "> settings saved");
+        setResult(RESULT_OK, d);
         finishPlain();
     }
 
-    private void finishPlain() {
-        finish();
-        overridePendingTransition(0, 0);
-    }
-
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
-    }
+    private void finishPlain() { finish(); overridePendingTransition(0, 0); }
+    private void addSpace(LinearLayout root, int d) { View v = new View(this); root.addView(v, new LinearLayout.LayoutParams(1, dp(d))); }
+    private int dp(int v) { return (int)(v * getResources().getDisplayMetrics().density + 0.5f); }
 }

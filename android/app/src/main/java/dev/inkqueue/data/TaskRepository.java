@@ -170,7 +170,6 @@ public class TaskRepository {
         values.put("status", task.status);
         values.put("due_date", task.dueDate);
         values.put("due_time", task.dueTime);
-        values.put("project", task.project);
         values.put("priority", task.priority);
         values.put("created_at", task.createdAt);
         values.put("updated_at", task.updatedAt);
@@ -189,7 +188,6 @@ public class TaskRepository {
         task.status = cursor.getString(cursor.getColumnIndexOrThrow("status"));
         task.dueDate = cursor.getString(cursor.getColumnIndexOrThrow("due_date"));
         task.dueTime = cursor.getString(cursor.getColumnIndexOrThrow("due_time"));
-        task.project = cursor.getString(cursor.getColumnIndexOrThrow("project"));
         task.priority = cursor.getString(cursor.getColumnIndexOrThrow("priority"));
         task.createdAt = cursor.getString(cursor.getColumnIndexOrThrow("created_at"));
         task.updatedAt = cursor.getString(cursor.getColumnIndexOrThrow("updated_at"));

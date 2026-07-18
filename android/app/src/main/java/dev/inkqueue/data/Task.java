@@ -17,7 +17,6 @@ public class Task implements DateUtils.TaskLike {
     public String status;
     public String dueDate;
     public String dueTime;
-    public String project;
     public String priority;
     public String createdAt;
     public String updatedAt;
@@ -52,7 +51,6 @@ public class Task implements DateUtils.TaskLike {
         task.status = nonEmpty(nullableString(json, "status"), STATUS_TODO);
         task.dueDate = nullableString(json, "due_date");
         task.dueTime = nullableString(json, "due_time");
-        task.project = nullableString(json, "project");
         task.priority = nonEmpty(nullableString(json, "priority"), PRIORITY_NORMAL);
         task.createdAt = nullableString(json, "created_at");
         task.updatedAt = nullableString(json, "updated_at");
@@ -71,7 +69,6 @@ public class Task implements DateUtils.TaskLike {
         put(json, "status", status);
         put(json, "due_date", dueDate);
         put(json, "due_time", dueTime);
-        put(json, "project", project);
         put(json, "priority", priority);
         put(json, "created_at", createdAt);
         put(json, "updated_at", updatedAt);

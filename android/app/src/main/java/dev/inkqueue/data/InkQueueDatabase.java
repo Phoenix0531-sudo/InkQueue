@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 
 public class InkQueueDatabase extends SQLiteOpenHelper {
     public static final String DB_NAME = "inkqueue.db";
-    public static final int DB_VERSION = 1;
+    public static final int DB_VERSION = 2;
 
     public InkQueueDatabase(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -21,7 +21,6 @@ public class InkQueueDatabase extends SQLiteOpenHelper {
                 "status TEXT NOT NULL," +
                 "due_date TEXT," +
                 "due_time TEXT," +
-                "project TEXT," +
                 "priority TEXT," +
                 "created_at TEXT," +
                 "updated_at TEXT," +

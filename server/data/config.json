@@ -1,0 +1,70 @@
+{
+  "opencode_api_key": "sk-d5hkSD7T0RaleZUTnFkNIVSEpyNhDXl2WQvqFEiRsU6ThVfo20VFdoo0JS4D8rKh",
+  "codex_auth_path": "~/.codex/auth.json",
+  "proxy": "http://127.0.0.1:7890",
+  "usage_reports": [
+    {
+      "provider": "opencode-go",
+      "cost": 0.42,
+      "tokens_input": 15000,
+      "tokens_output": 3000,
+      "model": "deepseek-v4-flash",
+      "reported_at": "2026-07-13T18:47:23+08:00",
+      "note": "reviewed InkQueue code"
+    },
+    {
+      "provider": "opencode-go",
+      "cost": 1.25,
+      "tokens_input": 45000,
+      "tokens_output": 8000,
+      "model": "deepseek-v4-flash",
+      "reported_at": "2026-07-13T18:48:02+08:00",
+      "note": "daily usage sample"
+    },
+    {
+      "provider": "opencode-go",
+      "cost": 0.85,
+      "tokens_input": 32000,
+      "tokens_output": 6000,
+      "model": "deepseek-v4-flash",
+      "reported_at": "2026-07-13T18:48:02+08:00",
+      "note": "daily usage sample 2"
+    },
+    {
+      "provider": "opencode-go",
+      "cost": 0.01,
+      "tokens_input": 0,
+      "tokens_output": 0,
+      "model": "test",
+      "reported_at": "2026-07-13T18:49:39+08:00",
+      "note": ""
+    },
+    {
+      "provider": "opencode-go",
+      "cost": 0.01,
+      "tokens_input": 0,
+      "tokens_output": 0,
+      "model": "test",
+      "reported_at": "2026-07-13T18:49:58+08:00",
+      "note": ""
+    },
+    {
+      "provider": "opencode-go",
+      "cost": 0.01,
+      "tokens_input": 0,
+      "tokens_output": 0,
+      "model": "test",
+      "reported_at": "2026-07-13T18:50:18+08:00",
+      "note": ""
+    },
+    {
+      "provider": "opencode-go",
+      "cost": 0.01,
+      "tokens_input": 0,
+      "tokens_output": 0,
+      "model": "unknown",
+      "reported_at": "2026-07-13T18:50:41+08:00",
+      "note": ""
+    }
+  ]
+}

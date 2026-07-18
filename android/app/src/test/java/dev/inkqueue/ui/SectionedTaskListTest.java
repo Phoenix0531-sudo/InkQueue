@@ -33,9 +33,9 @@ public class SectionedTaskListTest {
         tasks.add(task("week", "本周", "todo", "2026-07-10", null, false));
         List<SectionedTaskList.Row> rows = SectionedTaskList.group(tasks, "2026-07-06").toRows("2026-07-06");
         assertEquals(SectionedTaskList.Row.TYPE_SECTION, rows.get(0).type);
-        assertEquals("今日", rows.get(0).text);
+        assertEquals("// TODAY", rows.get(0).text);
         assertEquals(SectionedTaskList.Row.TYPE_EMPTY, rows.get(1).type);
-        assertTrue(rows.get(1).text.contains("今天没有任务"));
+        assertTrue(rows.get(1).text.contains("no tasks for today"));
     }
 
     @Test public void malformedDueDateFallsBackToLater() {

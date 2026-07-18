@@ -128,34 +128,29 @@ public final class DateUtils {
 
     public static String displayDue(TaskLike task, String today) {
         String dueDate = task.getDueDate();
-        String dueTime = task.getDueTime();
         StringBuilder out = new StringBuilder();
         if (!isEmpty(dueDate)) {
             try {
                 int diff = daysBetween(today, dueDate);
-                if (diff == 0) out.append("今天");
-                else if (diff == 1) out.append("明天");
-                else if (diff < 0) out.append("已过期 ").append(Math.abs(diff)).append(" 天");
+                if (diff == 0) out.append("today");
+                else if (diff == 1) out.append("tomorrow");
+                else if (diff < 0) out.append("overdue ").append(Math.abs(diff)).append("d");
                 else out.append(displayMonthDay(dueDate));
             } catch (IllegalArgumentException e) {
                 out.append(dueDate);
             }
-        }
-        if (!isEmpty(dueTime)) {
-            if (out.length() > 0) out.append(' ');
-            out.append(dueTime);
         }
         return out.toString();
     }
 
     public static String displayMonthDay(String date) {
         Calendar calendar = parseDate(date);
-        return String.format(Locale.CHINA, "%d月%d日", calendar.get(Calendar.MONTH) + 1, calendar.get(Calendar.DAY_OF_MONTH));
+        return String.format(Locale.CHINA, "%d/%d", calendar.get(Calendar.MONTH) + 1, calendar.get(Calendar.DAY_OF_MONTH));
     }
 
     public static String displayLastSync(String iso) {
-        if (isEmpty(iso) || iso.length() < 16) return "未同步";
-        return "已同步 " + iso.substring(11, 16);
+        if (isEmpty(iso) || iso.length() < 16) return "not synced";
+        return "synced " + iso.substring(11, 16);
     }
 
     private static long startOfDayMillis(Calendar calendar) {

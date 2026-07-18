@@ -126,7 +126,7 @@ test('create task, snapshot, complete and postpone operations', async () => {
     const createdA = await request(baseUrl, '/v1/tasks', {
       method: 'POST',
       headers: tokenHeader,
-      json: { title: '整理 BootSem 文档', due_date: '2026-07-06', due_time: '14:00', project: 'BootSem', priority: 'normal' }
+      json: { title: '整理 BootSem 文档', due_date: '2026-07-06', due_time: '14:00', priority: 'normal' }
     });
     assert.equal(createdA.status, 201);
     const taskA = (await createdA.json()).task;
@@ -136,7 +136,7 @@ test('create task, snapshot, complete and postpone operations', async () => {
     const createdB = await request(baseUrl, '/v1/tasks', {
       method: 'POST',
       headers: tokenHeader,
-      json: { title: '看盐构造 DEM 论文', due_date: '2026-07-06', due_time: '20:00', project: 'Research' }
+      json: { title: '\u770B\u76D0\u6784\u9020 DEM \u8BBA\u6587', due_date: '2026-07-06', due_time: '20:00' }
     });
     const taskB = (await createdB.json()).task;
 
@@ -170,6 +170,41 @@ test('create task, snapshot, complete and postpone operations', async () => {
     assert.equal(done.completed_at, '2026-07-06T09:00:00+08:00');
     assert.equal(postponed.due_date, '2026-07-07');
     assert.equal(postponed.due_time, '20:00');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+
+test('/v1/usage returns structured response with token', async () => {
+  fs.writeFileSync(process.env.INKQUEUE_DATA_FILE, JSON.stringify({ tasks: [] }, null, 2));
+  const server = start(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const tokenHeader = { 'X-InkQueue-Token': 'dev-token' };
+
+  try {
+    const res = await fetch(baseUrl + '/v1/usage', { headers: tokenHeader });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.server_time, 'server_time present');
+    assert.ok(Array.isArray(body.providers), 'providers is array');
+    assert.equal(body.providers.length, 2, 'two providers');
+    for (const p of body.providers) {
+      assert.ok(['opencode-go', 'chatgpt-plus'].includes(p.provider), 'valid provider name');
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('/v1/usage rejects missing token', async () => {
+  const server = start(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const res = await fetch(baseUrl + '/v1/usage');
+    assert.equal(res.status, 401);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

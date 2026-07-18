@@ -1,6 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ink_background">#FFFFFF</color>
-    <color name="ink_text">#000000</color>
-    <color name="ink_secondary">#333333</color>
-    <color name="ink_line">#000000</color>
+    <color name="ink_background">#000000</color>
+    <color name="ink_text">#FFFFFF</color>
+    <color name="ink_secondary">#CCCCCC</color>
+    <color name="ink_muted">#888888</color>
+    <color name="ink_line">#555555</color>
 </resources>

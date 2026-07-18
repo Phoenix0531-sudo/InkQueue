@@ -1,0 +1,5 @@
+# Agent Orchestrator Workflow
+Hermes = pure orchestrator (delegate_task dispatch)
+Codex  = planning + architecture audit + final review
+Claude Code = implementation
+Per-task review gate: each task reviewed by Codex after completion

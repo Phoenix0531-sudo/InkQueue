@@ -10,6 +10,7 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
@@ -26,6 +27,9 @@ public class TaskDetailActivity extends Activity {
     public static final String EXTRA_TASK_ID = "task_id";
     private TaskRepository repository;
     private Task task;
+    private final int bg = 0xff000000;
+    private final int fg = 0xffffffff;
+    private final int dim = 0xffcccccc;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -34,42 +38,84 @@ public class TaskDetailActivity extends Activity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         repository = new TaskRepository(this);
         task = repository.getTaskById(getIntent().getStringExtra(EXTRA_TASK_ID));
-        if (task == null) {
-            finishWithMessage("任务不存在");
-            return;
-        }
+        if (task == null) { finishWithMessage("not found"); return; }
         setContentView(buildLayout());
     }
 
     private View buildLayout() {
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.WHITE);
+        scroll.setBackgroundColor(bg);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(14), dp(18), dp(18));
+        root.setBackgroundColor(bg);
+        root.setPadding(dp(16), dp(12), dp(16), dp(14));
         scroll.addView(root);
 
-        TextView pageTitle = text("任务详情", 22, Color.BLACK, true);
-        root.addView(pageTitle);
-        addSpace(root, 20);
-        root.addView(text(task.title, 21, Color.BLACK, true));
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWithMessage(null); } });
+        TextView backLink = new TextView(this);
+        backLink.setText("< TODOLIST");
+        backLink.setTextColor(dim);
+        backLink.setTextSize(11);
+        top.addView(backLink);
+        root.addView(top);
+        addSpace(root, 14);
+
+        TextView taskTitle = new TextView(this);
+        taskTitle.setText(task.title == null ? "" : task.title);
+        taskTitle.setTextColor(fg);
+        taskTitle.setTextSize(18);
+        root.addView(taskTitle);
+        addSpace(root, 10);
+
         if (!DateUtils.isEmpty(task.note)) {
-            TextView note = text(task.note, 16, Color.BLACK, false);
-            note.setPadding(0, dp(14), 0, dp(14));
-            note.setLineSpacing(0, 1.18f);
+            TextView note = new TextView(this);
+            note.setText(task.note);
+            note.setTextColor(dim);
+            note.setTextSize(14);
+            note.setLineSpacing(0, 1.2f);
             root.addView(note);
-        } else {
-            addSpace(root, 12);
+            addSpace(root, 10);
         }
-        root.addView(meta("时间", DateUtils.displayDue(task, DateUtils.today())));
-        root.addView(meta("项目", task.project));
-        root.addView(meta("优先级", task.isHighPriority() ? "高" : "普通"));
-        addSection(root, "操作");
-        root.addView(action("完成", new View.OnClickListener() { @Override public void onClick(View v) { completeTask(); }}));
-        root.addView(action("推迟到明天", new View.OnClickListener() { @Override public void onClick(View v) { postpone("tomorrow"); }}));
-        root.addView(action("推迟到周末", new View.OnClickListener() { @Override public void onClick(View v) { postpone("weekend"); }}));
-        root.addView(action("推迟到下周", new View.OnClickListener() { @Override public void onClick(View v) { postpone("next_week"); }}));
-        root.addView(action("返回", new View.OnClickListener() { @Override public void onClick(View v) { finishWithMessage(null); }}));
+
+        View mr1 = new View(this); mr1.setBackgroundColor(0xff555555);
+        root.addView(mr1, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        root.addView(metaLine("due", DateUtils.displayDue(task, DateUtils.today())));
+        root.addView(metaLine("priority", task.isHighPriority() ? "HIGH" : "normal"));
+        View mr2 = new View(this); mr2.setBackgroundColor(0xff555555);
+        root.addView(mr2, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        addSpace(root, 14);
+
+        View ar1 = new View(this); ar1.setBackgroundColor(0xff555555);
+        root.addView(ar1, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        TextView ah = new TextView(this);
+        ah.setText("[ actions ]");
+        ah.setTextColor(dim);
+        ah.setTextSize(11);
+        ah.setGravity(Gravity.CENTER);
+        ah.setPadding(0, dp(6), 0, dp(6));
+        root.addView(ah);
+        View ar2 = new View(this); ar2.setBackgroundColor(0xff555555);
+        root.addView(ar2, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+
+        root.addView(actionItem("  [x] complete", new View.OnClickListener() { @Override public void onClick(View v) { completeTask(); } }));
+        root.addView(actionItem("  [>] tomorrow", new View.OnClickListener() { @Override public void onClick(View v) { postpone("tomorrow"); } }));
+        root.addView(actionItem("  [>] weekend", new View.OnClickListener() { @Override public void onClick(View v) { postpone("weekend"); } }));
+        root.addView(actionItem("  [>] next week", new View.OnClickListener() { @Override public void onClick(View v) { postpone("next_week"); } }));
+        View ar3 = new View(this); ar3.setBackgroundColor(0xff555555);
+        root.addView(ar3, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+
+        addSpace(root, 10);
+        TextView backBtn = new TextView(this);
+        backBtn.setText("< back");
+        backBtn.setTextColor(dim);
+        backBtn.setTextSize(13);
+        backBtn.setGravity(Gravity.CENTER);
+        backBtn.setMinHeight(dp(44));
+        backBtn.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { finishWithMessage(null); } });
+        root.addView(backBtn);
+
         return scroll;
     }
 
@@ -78,42 +124,31 @@ public class TaskDetailActivity extends Activity {
             String now = DateUtils.isoNow();
             new OperationQueue(repository).complete(task, now);
             triggerSync();
-            finishWithMessage(isOffline() ? "已保存，联网后同步" : "已完成");
+            finishWithMessage(isOffline() ? "saved. will sync when online." : "> done");
         } catch (Exception e) {
-            Toast.makeText(this, "操作失败", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "failed", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void postpone(String target) {
         try {
             String today = DateUtils.today();
-            String date;
-            String message;
-            if ("tomorrow".equals(target)) {
-                date = DateUtils.postponeToTomorrow(today);
-                message = "已推迟到明天";
-            } else if ("weekend".equals(target)) {
-                date = DateUtils.postponeToWeekend(today);
-                message = "已推迟到周末";
-            } else {
-                date = DateUtils.postponeToNextWeek(today);
-                message = "已推迟到下周";
-            }
+            String date, msg;
+            if ("tomorrow".equals(target)) { date = DateUtils.postponeToTomorrow(today); msg = "> postponed to tomorrow"; }
+            else if ("weekend".equals(target)) { date = DateUtils.postponeToWeekend(today); msg = "> postponed to weekend"; }
+            else { date = DateUtils.postponeToNextWeek(today); msg = "> postponed to next week"; }
             new OperationQueue(repository).postpone(task, date, target);
             triggerSync();
-            finishWithMessage(isOffline() ? "已保存，联网后同步" : message);
+            finishWithMessage(isOffline() ? "saved. will sync when online." : msg);
         } catch (Exception e) {
-            Toast.makeText(this, "操作失败", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "failed", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void triggerSync() {
         final Context app = getApplicationContext();
-        new AsyncTask<Void, Void, Void>() {
-            @Override protected Void doInBackground(Void... params) {
-                new SyncService(app).performSync();
-                return null;
-            }
+        new AsyncTask<Void,Void,Void>() {
+            protected Void doInBackground(Void...v) { new SyncService(app).performSync(); return null; }
         }.execute();
     }
 
@@ -124,55 +159,29 @@ public class TaskDetailActivity extends Activity {
         return info == null || !info.isConnected();
     }
 
-    private void finishWithMessage(String message) {
-        if (message != null) {
-            Intent data = new Intent();
-            data.putExtra("message", message);
-            setResult(RESULT_OK, data);
-        }
-        finish();
-        overridePendingTransition(0, 0);
+    private void finishWithMessage(String msg) {
+        if (msg != null) { Intent d = new Intent(); d.putExtra("message", msg); setResult(RESULT_OK, d); }
+        finish(); overridePendingTransition(0, 0);
     }
 
-    private TextView meta(String key, String value) {
-        TextView view = text(key + "：" + (DateUtils.isEmpty(value) ? "无" : value), 16, Color.BLACK, false);
-        view.setPadding(0, dp(4), 0, dp(4));
-        return view;
+    private View metaLine(String key, String value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(6), 0, dp(6));
+        TextView k = new TextView(this); k.setText(key); k.setTextColor(dim); k.setTextSize(12);
+        k.setLayoutParams(new LinearLayout.LayoutParams(dp(54), ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.addView(k);
+        TextView v = new TextView(this); v.setText(DateUtils.isEmpty(value) ? "-" : value); v.setTextColor(fg); v.setTextSize(12);
+        row.addView(v);
+        return row;
     }
 
-    private void addSection(LinearLayout root, String title) {
-        addSpace(root, 18);
-        View line = new View(this);
-        line.setBackgroundColor(Color.BLACK);
-        root.addView(line, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
-        TextView section = text(title, 18, Color.BLACK, true);
-        section.setPadding(0, dp(10), 0, dp(8));
-        root.addView(section);
+    private View actionItem(String label, View.OnClickListener listener) {
+        TextView v = new TextView(this); v.setText(label); v.setTextColor(fg); v.setTextSize(13);
+        v.setGravity(Gravity.CENTER_VERTICAL); v.setMinHeight(dp(46)); v.setOnClickListener(listener);
+        return v;
     }
 
-    private TextView action(String label, View.OnClickListener listener) {
-        TextView view = text(label, 18, Color.BLACK, false);
-        view.setGravity(Gravity.CENTER_VERTICAL);
-        view.setMinHeight(dp(56));
-        view.setOnClickListener(listener);
-        return view;
-    }
-
-    private TextView text(String value, int sp, int color, boolean bold) {
-        TextView text = new TextView(this);
-        text.setText(value == null ? "" : value);
-        text.setTextSize(sp);
-        text.setTextColor(color);
-        if (bold) text.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        return text;
-    }
-
-    private void addSpace(LinearLayout root, int dp) {
-        TextView space = new TextView(this);
-        root.addView(space, new LinearLayout.LayoutParams(1, dp(dp)));
-    }
-
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
-    }
+    private void addSpace(LinearLayout root, int d) { View v = new View(this); root.addView(v, new LinearLayout.LayoutParams(1, dp(d))); }
+    private int dp(int v) { return (int)(v * getResources().getDisplayMetrics().density + 0.5f); }
 }

@@ -1,7 +1,8 @@
 package dev.inkqueue.ui;
 
 import android.content.Context;
-import android.graphics.Typeface;
+import android.graphics.Color;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
@@ -12,8 +13,7 @@ import java.util.List;
 
 public class TaskAdapter extends BaseAdapter {
     private final Context context;
-    private final int black = 0xff000000;
-    private final int secondary = 0xff333333;
+    private final int secondary = 0xffcccccc;
     private List<SectionedTaskList.Row> rows = new ArrayList<SectionedTaskList.Row>();
 
     public TaskAdapter(Context context) {
@@ -41,30 +41,30 @@ public class TaskAdapter extends BaseAdapter {
     }
 
     private View sectionView(String title) {
-        LinearLayout box = new LinearLayout(context);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(18), dp(12), dp(18), dp(4));
-        TextView line = new TextView(context);
-        line.setHeight(dp(1));
-        line.setBackgroundColor(black);
-        box.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        LinearLayout outer = new LinearLayout(context);
+        outer.setOrientation(LinearLayout.HORIZONTAL);
+        outer.setGravity(Gravity.CENTER_VERTICAL);
+        outer.setPadding(dp(2), dp(8), dp(2), dp(4));
+        outer.setMinimumHeight(dp(38));
+        View bar = new View(context);
+        bar.setBackgroundColor(Color.WHITE);
+        outer.addView(bar, new LinearLayout.LayoutParams(dp(2), dp(15)));
+        addSpace(outer, 7);
         TextView text = new TextView(context);
         text.setText(title);
-        text.setTextColor(black);
-        text.setTextSize(18);
-        text.setTypeface(Typeface.DEFAULT_BOLD);
-        text.setPadding(0, dp(10), 0, dp(4));
-        box.addView(text);
-        return box;
+        text.setTextColor(Color.WHITE);
+        text.setTextSize(13);
+        outer.addView(text);
+        return outer;
     }
 
     private View emptyView(String message) {
         TextView text = new TextView(context);
         text.setText(message);
         text.setTextColor(secondary);
-        text.setTextSize(16);
-        text.setLineSpacing(0, 1.15f);
-        text.setPadding(dp(18), dp(12), dp(18), dp(18));
+        text.setTextSize(12);
+        text.setLineSpacing(0, 1.3f);
+        text.setPadding(dp(4), dp(12), dp(4), dp(20));
         text.setMinHeight(dp(56));
         return text;
     }
@@ -72,24 +72,31 @@ public class TaskAdapter extends BaseAdapter {
     private View taskView(SectionedTaskList.Row row) {
         LinearLayout box = new LinearLayout(context);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(18), dp(8), dp(18), dp(8));
-        box.setMinimumHeight(dp(58));
+        box.setPadding(dp(4), dp(8), dp(4), dp(8));
+        box.setMinimumHeight(dp(52));
         TextView title = new TextView(context);
-        title.setText("□ " + row.text);
-        title.setTextColor(black);
-        title.setTextSize(17);
+        title.setText("  [] " + row.text);
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(14);
         title.setSingleLine(false);
         title.setMaxLines(1);
         box.addView(title);
-        TextView meta = new TextView(context);
-        meta.setText(row.meta == null ? "" : "  " + row.meta);
-        meta.setTextColor(secondary);
-        meta.setTextSize(13);
-        meta.setPadding(0, dp(3), 0, 0);
-        meta.setSingleLine(false);
-        meta.setMaxLines(1);
-        box.addView(meta);
+        if (row.meta != null && row.meta.length() > 0) {
+            TextView meta = new TextView(context);
+            meta.setText("      " + row.meta);
+            meta.setTextColor(secondary);
+            meta.setTextSize(11);
+            meta.setPadding(0, dp(2), 0, 0);
+            meta.setSingleLine(false);
+            meta.setMaxLines(1);
+            box.addView(meta);
+        }
         return box;
+    }
+
+    private void addSpace(LinearLayout root, int dp) {
+        View space = new View(context);
+        root.addView(space, new LinearLayout.LayoutParams(1, dp(dp)));
     }
 
     private int dp(int value) {

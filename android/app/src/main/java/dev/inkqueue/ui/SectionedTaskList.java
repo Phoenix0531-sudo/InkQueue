@@ -41,9 +41,9 @@ public final class SectionedTaskList {
     public List<Row> toRows(String todayDate) {
         List<Row> rows = new ArrayList<Row>();
         boolean allEmpty = today.isEmpty() && week.isEmpty() && later.isEmpty();
-        appendSection(rows, "今日", today, allEmpty ? "没有任务。任务会由 Agent 同步到这里。" : "今天没有任务。\n可以让 Agent 帮你安排下一步。", todayDate);
-        appendSection(rows, "本周", week, null, todayDate);
-        appendSection(rows, "以后", later, null, todayDate);
+        appendSection(rows, "// TODAY", today, allEmpty ? "no tasks. they will be synced from your agent." : "no tasks for today. ask your agent.", todayDate);
+        appendSection(rows, "// THIS WEEK", week, null, todayDate);
+        appendSection(rows, "// LATER", later, null, todayDate);
         return rows;
     }
 
@@ -58,15 +58,11 @@ public final class SectionedTaskList {
 
     private static String meta(Task task, String todayDate) {
         StringBuilder meta = new StringBuilder();
-        if (task.isHighPriority()) meta.append("高优先级");
+        if (task.isHighPriority()) meta.append("HIGH");
         String due = DateUtils.displayDue(task, todayDate);
         if (!DateUtils.isEmpty(due)) {
-            if (meta.length() > 0) meta.append(" · ");
+            if (meta.length() > 0) meta.append(" \u00B7 ");
             meta.append(due);
-        }
-        if (!DateUtils.isEmpty(task.project)) {
-            if (meta.length() > 0) meta.append(" · ");
-            meta.append(task.project);
         }
         return meta.toString();
     }
