@@ -5,6 +5,7 @@
 [English](README.md) | [中文](README.zh-CN.md)
 
 ![CI](https://github.com/Phoenix0531-sudo/InkQueue/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 
 InkQueue 是一个面向旧安卓墨水屏设备的 Agent 同步任务队列 App。桌面显示名为 **任务**。
 
@@ -345,3 +346,7 @@ node scripts/seed-sample-tasks.js
 - 更严格的 per-device token。
 - Android instrumented repository 测试。
 - Brief / RSS / 机会雷达等独立未来项目，不属于 InkQueue v0.1。
+
+## License
+
+[MIT](LICENSE) — free for commercial use with attribution.

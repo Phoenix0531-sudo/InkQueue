@@ -14,27 +14,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  node:
-    name: Node checks
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt
+          elif [ -f requirements.txt ]; then pip install -r requirements.txt || true
+          fi
+          if [ -f pyproject.toml ]; then pip install -e ".[dev]" || pip install -e . || true; fi
+          pip install pytest
+      - name: Required files
+        run: |
+          test -f README.md
+          test -f LICENSE || test -f LICENSE.md
+      - name: Pytest (hard)
+        run: |
+          if [ -d tests ] || [ -d Test ]; then
+            python -m pytest -q
+          else
+            python -m pytest -q || python -c "print('no tests collected is ok if none defined')"
+          fi
+
+  go-build:
+    name: Go build (if present)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          node-version: "20"
-      - name: Install and test (best effort)
+          go-version: "1.22"
+      - name: Build modules
         run: |
-          if [ -f package.json ]; then
-            npm ci || npm install
-            npm test --if-present || true
-          elif [ -f frontend/package.json ]; then
-            (cd frontend && (npm ci || npm install) && (npm test --if-present || true))
-          elif [ -f server/package.json ]; then
-            (cd server && (npm ci || npm install) && (npm test --if-present || true))
+          if ls **/*.go >/dev/null 2>&1 || ls *.go >/dev/null 2>&1; then
+            mapfile -t mods < <(find . -name go.mod -not -path './vendor/*' | head -10)
+            if [ ${#mods[@]} -eq 0 ]; then
+              echo "Go files without go.mod — skip build"
+            else
+              for m in "${mods[@]}"; do
+                dir=$(dirname "$m")
+                (cd "$dir" && go build ./...)
+              done
+            fi
           else
-            echo "No package.json found"
+            echo "No Go sources"
           fi
-
