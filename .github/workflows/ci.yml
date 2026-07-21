@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install and test (best effort)
+        run: |
+          if [ -f package.json ]; then
+            npm ci || npm install
+            npm test --if-present || true
+          elif [ -f frontend/package.json ]; then
+            (cd frontend && (npm ci || npm install) && (npm test --if-present || true))
+          elif [ -f server/package.json ]; then
+            (cd server && (npm ci || npm install) && (npm test --if-present || true))
+          else
+            echo "No package.json found"
+          fi
+

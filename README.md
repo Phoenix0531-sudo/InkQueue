@@ -1,5 +1,11 @@
 # InkQueue
 
+**CPA usage and task queue companion for e-ink devices**
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+![CI](https://github.com/Phoenix0531-sudo/InkQueue/actions/workflows/ci.yml/badge.svg)
+
 InkQueue 是一个面向旧安卓墨水屏设备的 Agent 同步任务队列 App。桌面显示名为 **任务**。
 
 定位：**Agent-synced task queue for e-ink devices.**
@@ -89,7 +95,19 @@ InkQueue/
 
 ## 参考 server 启动
 
-环境：Node.js 18+。本机验证使用 Node `v24.17.0`。
+环境：Node.js 18+。
+
+推荐用进程脚本（避免 8787 残留多实例）：
+
+```bash
+# 从仓库根目录
+node scripts/server-ctl.js start
+node scripts/server-ctl.js status
+node scripts/server-ctl.js restart
+node scripts/server-ctl.js stop
+```
+
+或直接：
 
 ```bash
 cd server
@@ -98,10 +116,11 @@ npm start
 
 默认：
 
-- URL: `http://localhost:8787`
+- URL: `http://localhost:8787`（绑定 `0.0.0.0`，局域网可访问）
 - Token: `dev-token`
 - Header: `X-InkQueue-Token: dev-token`
 - 数据文件: `server/data/tasks.json`
+- 产品时区: **Asia/Shanghai**（服务端 `server_time` / 客户端分组与推迟均按北京时间）
 
 健康检查：
 
@@ -109,13 +128,17 @@ npm start
 curl http://localhost:8787/v1/health
 ```
 
-创建测试任务：
+创建测试任务（或一键样例）：
 
 ```bash
+# 单条
 curl -X POST http://localhost:8787/v1/tasks \
   -H "Content-Type: application/json" \
   -H "X-InkQueue-Token: dev-token" \
   -d '{"title":"整理 BootSem 文档","due_date":"2026-07-06","due_time":"14:00","project":"BootSem","priority":"normal"}'
+
+# 一批样例（今日/本周/以后）
+node scripts/seed-sample-tasks.js
 ```
 
 拉取任务：
@@ -133,6 +156,64 @@ curl -X POST http://localhost:8787/v1/tasks/operations \
   -H "X-InkQueue-Token: dev-token" \
   --data-binary @../tests/api-examples/operations.json
 ```
+
+## CLIProxyAPI 健康 / 账号池面板
+
+InkQueue server 读本机 CLIProxyAPI 账号池（默认 `~/.cli-proxy-api`）并探活 `http://127.0.0.1:18317/v1/models`。
+
+**不重启 CLIProxyAPI 也能看账号池**（读本地 auth 目录 + `/v1/models`）。
+
+若已配置 Management：
+
+- CLIProxy `config.yaml`：`remote-management.secret-key`（启动后会 bcrypt 哈希）
+- InkQueue `server/data/config.json`：`cliproxy_management_key`
+- 面板会额外显示 runtime success/failed、auth_status、usage-queue
+
+配置（`server/data/config.json`，已 gitignore）：
+
+```json
+{
+  "cliproxy_base_url": "http://127.0.0.1:18317",
+  "cliproxy_api_key": "sk-cliproxy-local",
+  "cliproxy_auth_dir": "~/.cli-proxy-api",
+  "cliproxy_management_key": "mg-cliproxy-local"
+}
+```
+
+接口：
+
+```bash
+# 探活
+curl http://localhost:8787/v1/cliproxy/health \
+  -H "X-InkQueue-Token: dev-token"
+
+# 账号池汇总 + 脱敏列表
+curl http://localhost:8787/v1/cliproxy/pool \
+  -H "X-InkQueue-Token: dev-token"
+
+# Kindle 用量总接口（仅 CPA / cliproxyapi；force=1 跳过短缓存）
+curl "http://localhost:8787/v1/usage?force=1" \
+  -H "X-InkQueue-Token: dev-token"
+```
+
+浏览器管理面板：
+
+```text
+http://localhost:8787/admin/cliproxy?token=dev-token
+```
+
+### Codex 健康与额度（重要）
+
+- `/v1/usage` **默认会探活 Codex**（最多 5 个账号），用 `chatgpt.com/backend-api/wham/usage` 校验 token 是否真可用。
+- 仪表盘 **`codex_enabled` = 探活成功数**，不是 auth 目录文件数。文件里有 3 个、2 个 401 时显示 **可用 1 · 失效 2**。
+- **InkQueue 不删除 / 不禁用 401 账号文件**。清理交给 CLIProxyAPI 或账号导入侧；文件消失后本服务自动不再计入。
+- 额度百分比来自接口 `rate_limit.primary_window.used_percent`；窗口标签来自 `limit_window_seconds`（例如 `604800` → **7 天**）。**禁止写死「5 小时」**——当前 Plus 实测常为 7 天窗口，`secondary_window` 可能为 null。
+- 累计「成功 N 次」是 CPA **调用次数**，不是账号数。
+
+可选 query：
+
+- `?force=1`：跳过 usage 短缓存（SYNC 默认带）
+- `?codex_usage=1`：历史兼容；当前默认已探 Codex，语义等同强调额度详情
 
 ## Android 构建
 
@@ -162,10 +243,7 @@ cd android
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-本机已构建出的 APK：
-
-- 大小：`36808` bytes
-- SHA-256：`a8f9129bdda134d1bbb5b688c802360407848933dda5048cb6ac5dc4ca35f539`
+本机近期构建量级：约 **68KB**（无 AndroidX / 无重依赖）。具体 SHA 每次构建会变，以本地 `sha256sum` 为准。
 
 ## 安装到设备
 
@@ -227,86 +305,43 @@ curl http://localhost:8787/v1/tasks/snapshot \
 
 ## 测试
 
-Server API 测试：
+Server API + CLIProxy 单元测试：
 
 ```bash
 cd server
 npm test
 ```
 
-本机真实输出摘要：
+预期：全部 pass（含 Codex 额度窗口解析、`7天` 标签、探活计数语义）。
 
-```text
-✔ health endpoint returns ok without token
-✔ snapshot rejects missing token
-✔ create task, snapshot, complete and postpone operations
-tests 3, pass 3, fail 0
-```
-
-Android JVM 测试：
-
-```bash
-cd android
-./gradlew testDebugUnitTest
-```
-
-本机真实测试结果：
-
-```text
-TEST-dev.inkqueue.ui.SectionedTaskListTest.xml: tests=2 failures=0 skipped=0
-TEST-dev.inkqueue.util.DateUtilsTest.xml: tests=7 failures=0 skipped=0
-TEST-dev.inkqueue.util.JsonUtilsTest.xml: tests=1 failures=0 skipped=0
-TOTAL tests=10 failures=0 skipped=0
-```
-
-Android 构建验证：
+Android JVM 测试 + 构建：
 
 ```bash
 cd android
 ./gradlew testDebugUnitTest assembleDebug
 ```
 
-本机真实输出：
-
-```text
-BUILD SUCCESSFUL
-```
-
-Android lint 验证：
+样例任务：
 
 ```bash
-cd android
-./gradlew lintDebug
-```
-
-本机真实输出：
-
-```text
-BUILD SUCCESSFUL
-```
-
-API curl 端到端验证摘要：
-
-```text
-health={  "ok": true}
-created_task=task_mrbecrf2_e41a283f
-snapshot_count=2
-operations={ "accepted": ["op_test_complete"], "ignored": [], "errors": [] }
-final_status=done
+node scripts/seed-sample-tasks.js
 ```
 
 ## 已知限制
 
-- 当前环境 `adb devices` 没有检测到真机或模拟器，因此没有完成真机安装/点击测试。
-- SQLite Repository 的 instrumented 测试需要 Android runtime；当前 v0.1 通过 JVM 逻辑测试、server API 测试和 APK 编译验证。
-- v0.1 是单设备/单 token 参考实现，不是多用户生产后端。
-- 参考 server 使用 JSON 文件持久化，不适合高并发。
-- Android 客户端不提供 Kindle 端创建任务入口，任务创建主要由 Agent/Server API 完成。
-- 无后台常驻服务和推送；同步发生在打开 App、点击同步或完成/推迟后。
+- 参考 server 使用 JSON 文件持久化，单 token，不是多用户生产后端。
+- Android 客户端不提供 Kindle 端创建任务入口；任务由 Agent / `POST /v1/tasks` 写入。
+- 无后台常驻推送；同步发生在打开 App、点 SYNC、或完成/推迟后（在线时）。
+- 离线时本地操作入 pending 队列；上传失败累计 10 次后丢弃该 op，避免堵死队列。
+- Codex 401 / 失效账号文件由 **CLIProxyAPI / CPAMP 侧**清理；InkQueue 只显示失效，不改 auth 目录。
+- 当前本机 auth-dir 可能只有 Grok、无 Codex 文件，则仪表盘诚实显示 **Codex 可用 0**。
+- Management 密钥错误会 401，连错多次会 IP 临时 ban（约 30 分钟）；解 ban / 重设 secret 在 CPA 侧。
+- Grok 无稳定「剩余 %」接口字段；仪表盘以账号池容量为主。
+- v0.1 支持局域网 HTTP；生产建议 HTTPS。
 
 ## Roadmap
 
 - 生产后端可替换为 Cloudflare Worker + D1/KV。
-- 可增加更严格的 per-device token 管理。
-- 可增加 Android instrumented repository 测试。
-- 可增加 Brief / RSS / 机会雷达等独立未来项目，但不属于 InkQueue v0.1。
+- 更严格的 per-device token。
+- Android instrumented repository 测试。
+- Brief / RSS / 机会雷达等独立未来项目，不属于 InkQueue v0.1。
