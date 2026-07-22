@@ -1,49 +1,36 @@
 # InkQueue
 
-**Local-first queue service stack: Node server plus Android client experiments.**
+**Local-first queue service for agent / e-ink device workflows — Node server + Android client.**
 
 [English](README.md) | [中文](README.zh-CN.md)
 
 [![CI](https://github.com/Phoenix0531-sudo/InkQueue/actions/workflows/ci.yml/badge.svg)](https://github.com/Phoenix0531-sudo/InkQueue/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Agent / device workflow plumbing.
+Internal tooling portfolio piece: a **Node** service under `server/` with npm test CI, Android client experiments under `android/`, plus `scripts/` and `tasks/` helpers. Ports and tokens are environment-specific — keep secrets out of git.
 
 ## Preview
 
 ![InkQueue](docs/screenshots/preview.png)
 
-## Features
+## Layout
 
-- server/ Node service
-- android/ client experiments
-- npm test CI for the server path
-- scripts/ + tasks helpers
+```
+server/      # Node service (primary CI path)
+android/     # client experiments
+scripts/ tasks/ docs/ tests/
+```
 
-## Get started
-
-### Install
+## Install / test
 
 ```bash
 git clone https://github.com/Phoenix0531-sudo/InkQueue.git
 cd InkQueue/server
-npm install && npm test
+npm install
+npm test
+# start command: see server README / package.json scripts
 ```
-
-### Usage
-
-See server/ README and scripts for start commands. Keep tokens out of git.
-
-## Project layout
-
-```
-server/  android/  scripts/  tasks/
-```
-
-## Notes
-
-Internal tooling portfolio piece. Ports are environment-specific.
 
 ## License
 
-MIT. Free for commercial use with attribution where applicable. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
