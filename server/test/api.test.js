@@ -8,9 +8,10 @@ const path = require('path');
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inkqueue-api-'));
 process.env.INKQUEUE_DATA_FILE = path.join(tmpDir, 'tasks.json');
+process.env.INKQUEUE_CONFIG_FILE = path.join(tmpDir, 'config.json');
 process.env.INKQUEUE_TOKEN = 'dev-token';
 
-const { start, readStore } = require('../src/server');
+const { start, readStore, validateStartupConfig } = require('../src/server');
 
 function request(baseUrl, pathname, options = {}) {
   const headers = Object.assign({}, options.headers || {});
@@ -178,6 +179,14 @@ test('create task, snapshot, complete and postpone operations', async () => {
 
 test('/v1/usage returns structured response with token', async () => {
   fs.writeFileSync(process.env.INKQUEUE_DATA_FILE, JSON.stringify({ tasks: [] }, null, 2));
+  fs.writeFileSync(process.env.INKQUEUE_CONFIG_FILE, JSON.stringify({
+    codex_auth_path: path.join(tmpDir, 'missing-codex-auth.json'),
+    usage_reports: [{
+      provider: 'opencode-go',
+      cost: 12,
+      reported_at: new Date().toISOString()
+    }]
+  }, null, 2));
   const server = start(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -189,13 +198,91 @@ test('/v1/usage returns structured response with token', async () => {
     const body = await res.json();
     assert.ok(body.server_time, 'server_time present');
     assert.ok(Array.isArray(body.providers), 'providers is array');
-    assert.equal(body.providers.length, 2, 'two providers');
-    for (const p of body.providers) {
-      assert.ok(['opencode-go', 'chatgpt-plus'].includes(p.provider), 'valid provider name');
-    }
+    assert.equal(body.providers.length, 1, 'only cliproxyapi/CPA provider');
+    assert.equal(body.providers[0].provider, 'cliproxyapi');
+    assert.ok(body.providers[0].data, 'cpa data present');
+    assert.ok(Array.isArray(body.providers[0].data.lines), 'cpa display lines');
+    assert.ok(body.cliproxy, 'cliproxy summary block present');
+    assert.doesNotMatch(JSON.stringify(body), /reports|reported_cost|total_reported_cost/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test('authenticated usage report endpoint is not available and does not change config', async () => {
+  const originalConfig = JSON.stringify({
+    marker: 'keep-me',
+    usage_reports: [{ provider: 'opencode-go', cost: 1 }]
+  }, null, 2);
+  fs.writeFileSync(process.env.INKQUEUE_CONFIG_FILE, originalConfig);
+  const server = start(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const res = await request(baseUrl, '/v1/usage/report', {
+      method: 'POST',
+      headers: { 'X-InkQueue-Token': 'dev-token' },
+      json: { provider: 'opencode-go', cost: 99 }
+    });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: 'not found' });
+    assert.equal(fs.readFileSync(process.env.INKQUEUE_CONFIG_FILE, 'utf8'), originalConfig);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('startup config validation warns when config is missing', () => {
+  const warnings = [];
+  validateStartupConfig(path.join(tmpDir, 'missing-config.json'), {
+    warn: (...args) => warnings.push(args.join(' '))
+  });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /no config\.json found/);
+});
+
+test('startup config validation warns when config JSON is invalid', () => {
+  const configFile = path.join(tmpDir, 'invalid-config.json');
+  fs.writeFileSync(configFile, '{bad json');
+  const warnings = [];
+  validateStartupConfig(configFile, {
+    warn: (...args) => warnings.push(args.join(' '))
+  });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /parse error/);
+});
+
+test('startup config validation warns when opencode_api_key is missing', () => {
+  const configFile = path.join(tmpDir, 'keyless-config.json');
+  fs.writeFileSync(configFile, JSON.stringify({ proxy: 'http://localhost' }));
+  const warnings = [];
+  validateStartupConfig(configFile, {
+    warn: (...args) => warnings.push(args.join(' '))
+  });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /opencode_api_key/);
+});
+
+test('startup config validation treats null config as missing opencode_api_key', () => {
+  const configFile = path.join(tmpDir, 'null-config.json');
+  fs.writeFileSync(configFile, 'null');
+  const warnings = [];
+  assert.doesNotThrow(() => validateStartupConfig(configFile, {
+    warn: (...args) => warnings.push(args.join(' '))
+  }));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /opencode_api_key/);
+});
+
+test('startup config validation accepts a nonempty opencode_api_key', () => {
+  const configFile = path.join(tmpDir, 'valid-config.json');
+  fs.writeFileSync(configFile, JSON.stringify({ opencode_api_key: 'test-key' }));
+  const warnings = [];
+  validateStartupConfig(configFile, {
+    warn: (...args) => warnings.push(args.join(' '))
+  });
+  assert.equal(warnings.length, 0);
 });
 
 test('/v1/usage rejects missing token', async () => {

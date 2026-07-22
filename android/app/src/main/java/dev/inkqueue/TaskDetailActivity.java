@@ -146,9 +146,13 @@ public class TaskDetailActivity extends Activity {
     }
 
     private void triggerSync() {
+        if (isOffline()) return; // keep local queue; next online open/SYNC will upload
         final Context app = getApplicationContext();
-        new AsyncTask<Void,Void,Void>() {
-            protected Void doInBackground(Void...v) { new SyncService(app).performSync(); return null; }
+        new AsyncTask<Void, Void, Void>() {
+            @Override protected Void doInBackground(Void... v) {
+                new SyncService(app).performSync();
+                return null;
+            }
         }.execute();
     }
 

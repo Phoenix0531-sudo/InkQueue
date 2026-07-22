@@ -155,3 +155,96 @@ curl -X PATCH http://localhost:8787/v1/tasks/task_001 \
   -H "X-InkQueue-Token: dev-token" \
   -d '{"priority":"high","note":"补充提交注意事项"}'
 ```
+
+## CLIProxyAPI 健康 / 账号池 / 用量
+
+v0.1 额外提供 CLIProxyAPI 监控接口。当前默认：
+
+- 读本地 `~/.cli-proxy-api/*.json` 账号池
+- 探活 `http://127.0.0.1:18317/v1/models`
+- 若配置了 `cliproxy_management_key`，再读 Management API：
+  - `/v0/management/get-auth-status`
+  - `/v0/management/auth-files`（success/failed/unavailable）
+  - `/v0/management/usage-statistics-enabled`
+  - `/v0/management/api-key-usage`
+  - `/v0/management/usage-queue`
+
+配置见 `server/data/config.json`：
+
+```json
+{
+  "cliproxy_base_url": "http://127.0.0.1:18317",
+  "cliproxy_api_key": "sk-cliproxy-local",
+  "cliproxy_auth_dir": "~/.cli-proxy-api",
+  "cliproxy_management_key": "mg-cliproxy-local",
+  "proxy": "http://127.0.0.1:7890"
+}
+```
+
+CLIProxyAPI 侧：
+
+```yaml
+remote-management:
+  allow-remote: false
+  secret-key: "mg-cliproxy-local"   # 启动后会被 bcrypt 哈希写回
+```
+
+`secret-key` 改完后需重启 CLIProxyAPI 一次。`allow-remote: false` 时仅本机可访问 Management。
+### GET /v1/cliproxy/health
+
+```bash
+curl http://localhost:8787/v1/cliproxy/health \
+  -H "X-InkQueue-Token: dev-token"
+```
+
+返回 `ok`、延迟、`model_count`、模型抽样。
+
+### GET /v1/cliproxy/pool
+
+```bash
+curl http://localhost:8787/v1/cliproxy/pool \
+  -H "X-InkQueue-Token: dev-token"
+```
+
+返回账号池汇总（按 type 计数、启用/禁用/token 过期）和脱敏账号列表。
+
+**Codex 探活：** `/v1/usage` 默认会探测 Codex 账号是否真实可用（`wham/usage`）。  
+`codex_enabled` = 探活成功数；`codex_dead` = 401 等失败数。  
+**InkQueue 不会删除 CLIProxy auth 目录里的 401 文件**——由 CLIProxy / 账号侧自行清理。
+
+额度标签：
+
+- 字段：`rate_limit.primary_window.used_percent`、`limit_window_seconds`
+- 例：`limit_window_seconds = 604800` → 展示「7天」，**不是**写死的 5 小时
+
+Query：
+
+- `?force=1`：跳过 usage 短缓存（约 8s）
+- `?codex_usage=1`：兼容参数；当前默认已探 Codex
+
+### GET /v1/usage
+
+Kindle 首页仪表盘数据源。**仅返回 `cliproxyapi` provider**（CPA 账号池），不再混入 OpenCode/ChatGPT 条。
+
+```bash
+curl "http://localhost:8787/v1/usage?force=1" \
+  -H "X-InkQueue-Token: dev-token"
+```
+
+`data` 关键字段包括：`codex_enabled`、`codex_dead`、`codex_total`、`xai_enabled`、`total_accounts`、`success`/`failed`（累计调用次数）、`lines`（中文文案）、`codex_quota`（有效号额度摘要）。
+
+### GET /admin/cliproxy
+
+浏览器管理面板：
+
+```text
+http://localhost:8787/admin/cliproxy?token=dev-token
+```
+
+也可用 Header：`X-InkQueue-Token: dev-token`。
+
+注意：
+
+- 响应中的邮箱已脱敏，不会返回 access_token / refresh_token
+- 当前不会改写或重启 CLIProxyAPI
+- 产品时区固定 **Asia/Shanghai**

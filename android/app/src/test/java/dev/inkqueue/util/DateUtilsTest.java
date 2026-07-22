@@ -50,4 +50,14 @@ public class DateUtilsTest {
         assertFalse(DateUtils.isTodayOrOverdue("2026-02-31", "2026-07-06"));
         assertFalse(DateUtils.isAfterTodayWithinThisWeek("2026-02-31", "2026-07-06"));
     }
+
+    @Test public void isoNowUsesShanghaiOffset() {
+        String iso = DateUtils.isoNow();
+        assertTrue(iso.endsWith("+08:00"));
+        assertEquals(25, iso.length());
+    }
+
+    @Test public void todayIsValidShanghaiDate() {
+        assertTrue(DateUtils.isValidDate(DateUtils.today()));
+    }
 }

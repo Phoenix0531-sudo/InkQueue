@@ -39,7 +39,8 @@ public class SyncClient {
     public List<UsageProvider> fetchUsage() {
         HttpURLConnection conn = null;
         try {
-            conn = open("/v1/usage", "GET");
+            // force=1: skip server short cache so SYNC always refreshes account pool counts
+            conn = open("/v1/usage?force=1", "GET");
             int code = conn.getResponseCode();
             if (code != 200) return new java.util.ArrayList<UsageProvider>();
             String body = readResponse(conn, code);

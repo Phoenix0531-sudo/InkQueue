@@ -39,6 +39,8 @@ public class MainActivity extends Activity {
     private String pendingMessage;
     private ServerDiscovery discovery;
     private LinearLayout usageView;
+    private AsyncTask<?, ?, ?> activeSyncTask;
+    private AsyncTask<?, ?, ?> activeUsageTask;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -59,8 +61,27 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        if (discovery != null) discovery.stop();
+        cancelAsyncWork();
+        if (discovery != null) {
+            discovery.stop();
+            discovery = null;
+        }
         super.onDestroy();
+    }
+
+    private void cancelAsyncWork() {
+        if (activeSyncTask != null) {
+            activeSyncTask.cancel(true);
+            activeSyncTask = null;
+        }
+        if (activeUsageTask != null) {
+            activeUsageTask.cancel(true);
+            activeUsageTask = null;
+        }
+    }
+
+    private boolean isActivityAlive() {
+        return !isFinishing();
     }
 
     private boolean isOnline() {
@@ -161,54 +182,198 @@ public class MainActivity extends Activity {
     }
 
     private void renderUsage(final List<UsageProvider> providers) {
+        if (!isActivityAlive() || usageView == null) return;
         usageView.removeAllViews();
         if (providers == null || providers.isEmpty()) return;
-        for (final UsageProvider p : providers) {
-            // Provider name
-            TextView name = new TextView(this);
-            name.setText(p.getDisplayName());
-            name.setTextColor(Color.WHITE);
-            name.setTextSize(11);
-            name.setTypeface(android.graphics.Typeface.MONOSPACE);
-            usageView.addView(name);
 
-            if (p.getStatusText() != null) {
-                // Error state
-                TextView err = new TextView(this);
-                err.setText(p.getStatusText());
-                err.setTextColor(0xff888888);
-                err.setTextSize(10);
-                err.setTypeface(android.graphics.Typeface.MONOSPACE);
-                usageView.addView(err);
-            } else {
-                // Usage bar: 5-hour
-                usageView.addView(barRow("  " + p.label5h, p.usagePercent5h));
-                // Usage bar: weekly
-                usageView.addView(barRow("  " + p.labelWeek, p.usagePercentWeek));
-                // Usage bar: monthly
-                usageView.addView(barRow("  " + p.labelMonth, p.usagePercentMonth));
-                // Total cost line
-                if (p.totalCost > 0 || p.lastSession != null) {
-                    StringBuilder totalLine = new StringBuilder();
-                    if (p.totalCost > 0) totalLine.append("  $" + String.format("%.2f", p.totalCost) + " total");
-                    if (p.lastSession != null) {
-                        String shortDate = p.lastSession.length() >= 10 ? p.lastSession.substring(0, 10) : p.lastSession;
-                        totalLine.append(" · last " + shortDate);
-                    }
-                    TextView totalTv = new TextView(this);
-                    totalTv.setText(totalLine.toString());
-                    totalTv.setTextColor(0xff888888);
-                    totalTv.setTextSize(9);
-                    totalTv.setTypeface(android.graphics.Typeface.MONOSPACE);
-                    totalTv.setPadding(dp(4), dp(1), dp(4), dp(3));
-                    usageView.addView(totalTv);
-                }
+        UsageProvider cpa = null;
+        for (int i = 0; i < providers.size(); i++) {
+            UsageProvider p = providers.get(i);
+            if (p.isPool || "cliproxyapi".equals(p.provider)) {
+                cpa = p;
+                break;
             }
         }
+        if (cpa == null) return;
+
+        // Card shell
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(10), dp(8), dp(10), dp(8));
+        card.setBackgroundColor(Color.BLACK);
+        // Outer border via nested frames: top/bottom lines only to keep e-ink clean.
+
+        // Header row: title + status badge
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView title = new TextView(this);
+        title.setText("CPA");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(14);
+        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        header.addView(title);
+
+        TextView badge = new TextView(this);
+        boolean ok = cpa.getStatusText() == null && cpa.error == null;
+        badge.setText(ok ? " 正常 " : " 异常 ");
+        badge.setTextColor(ok ? Color.BLACK : Color.WHITE);
+        badge.setBackgroundColor(ok ? Color.WHITE : 0xff888888);
+        badge.setTextSize(11);
+        badge.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        badge.setPadding(dp(6), dp(2), dp(6), dp(2));
+        header.addView(badge);
+        card.addView(header);
+
+        TextView sub = new TextView(this);
+        if (cpa.latencyMs > 0) {
+            sub.setText("延迟 " + formatLatency(cpa.latencyMs) + " · 模型 " + cpa.modelCount);
+        } else {
+            sub.setText("模型 " + cpa.modelCount);
+        }
+        sub.setTextColor(0xffbbbbbb);
+        sub.setTextSize(11);
+        sub.setPadding(0, dp(2), 0, dp(6));
+        card.addView(sub);
+
+        card.addView(thinLine());
+
+        // Big metrics row: accounts / codex / grok
+        LinearLayout metrics = new LinearLayout(this);
+        metrics.setOrientation(LinearLayout.HORIZONTAL);
+        metrics.setPadding(0, dp(6), 0, dp(4));
+        metrics.addView(metricCell("账号", String.valueOf(cpa.totalAccounts), cpa.enough ? "够用" : "偏少"));
+        metrics.addView(vDiv());
+        String codexHint = cpa.codexDead > 0
+                ? ("失效" + cpa.codexDead)
+                : "可用号";
+        metrics.addView(metricCell("Codex", String.valueOf(cpa.codexEnabled), codexHint));
+        metrics.addView(vDiv());
+        metrics.addView(metricCell("Grok", String.valueOf(cpa.xaiEnabled), "可用号"));
+        card.addView(metrics);
+
+        card.addView(thinLine());
+
+        // Detail rows — 累计次数 ≠ 账号数
+        if (cpa.codexDead > 0 || cpa.codexQuotaPercent >= 0) {
+            String codexDetail = "可用 " + cpa.codexEnabled;
+            if (cpa.codexTotal > 0) codexDetail += "/" + cpa.codexTotal;
+            if (cpa.codexDead > 0) codexDetail += " · 失效 " + cpa.codexDead;
+            // Label comes from API limit_window_seconds — do NOT hardcode "5h"
+            if (cpa.codexQuotaPercent >= 0) {
+                String window = (cpa.codexQuotaLabel != null && cpa.codexQuotaLabel.length() > 0)
+                        ? cpa.codexQuotaLabel
+                        : "额度";
+                codexDetail += " · " + window + "已用 " + cpa.codexQuotaPercent + "%";
+            }
+            card.addView(kvRow("Codex", codexDetail));
+        }
+        card.addView(kvRow("调用", "累计成功 " + cpa.success + " 次 · 失败 " + cpa.failed + " 次"
+                + (cpa.unavailable > 0 ? (" · 异常号 " + cpa.unavailable) : "")));
+        if (cpa.disabled > 0 || cpa.tokenExpired > 0) {
+            card.addView(kvRow("账号", "禁用 " + cpa.disabled + " · 过期 " + cpa.tokenExpired));
+        }
+
+        if (cpa.recentCount > 0 || cpa.lastModel != null) {
+            String recent = "近 " + cpa.recentCount + " 次 · 失败 " + cpa.recentFails;
+            if (cpa.recentAvgLatencyMs > 0) recent += " · 均 " + formatLatency(cpa.recentAvgLatencyMs);
+            card.addView(kvRow("最近", recent));
+            if (cpa.lastModel != null) {
+                card.addView(kvRow("模型", cpa.lastModel));
+            }
+        } else if (cpa.getStatusText() != null) {
+            card.addView(kvRow("说明", cpa.getStatusText()));
+        }
+
+        usageView.addView(card);
+
         View bottomLine = new View(this);
         bottomLine.setBackgroundColor(0xff555555);
-        usageView.addView(bottomLine, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-        addSpace(usageView, 4);
+        usageView.addView(bottomLine, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        addSpace(usageView, 6);
+    }
+
+    private View thinLine() {
+        View line = new View(this);
+        line.setBackgroundColor(0xff444444);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        lp.topMargin = dp(2);
+        lp.bottomMargin = dp(2);
+        line.setLayoutParams(lp);
+        return line;
+    }
+
+    private View vDiv() {
+        View d = new View(this);
+        d.setBackgroundColor(0xff444444);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(1), dp(36));
+        lp.leftMargin = dp(4);
+        lp.rightMargin = dp(4);
+        lp.gravity = Gravity.CENTER_VERTICAL;
+        d.setLayoutParams(lp);
+        return d;
+    }
+
+    private LinearLayout metricCell(String label, String value, String hint) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER_HORIZONTAL);
+        cell.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        cell.setPadding(dp(2), dp(2), dp(2), dp(2));
+
+        TextView v = new TextView(this);
+        v.setText(value);
+        v.setTextColor(Color.WHITE);
+        v.setTextSize(20);
+        v.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        v.setGravity(Gravity.CENTER);
+        cell.addView(v);
+
+        TextView l = new TextView(this);
+        l.setText(label);
+        l.setTextColor(0xffdddddd);
+        l.setTextSize(11);
+        l.setGravity(Gravity.CENTER);
+        cell.addView(l);
+
+        TextView h = new TextView(this);
+        h.setText(hint);
+        h.setTextColor(0xff999999);
+        h.setTextSize(10);
+        h.setGravity(Gravity.CENTER);
+        cell.addView(h);
+        return cell;
+    }
+
+    private LinearLayout kvRow(String key, String value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(3), 0, dp(3));
+
+        TextView k = new TextView(this);
+        k.setText(key);
+        k.setTextColor(0xffaaaaaa);
+        k.setTextSize(12);
+        k.setLayoutParams(new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.addView(k);
+
+        TextView v = new TextView(this);
+        v.setText(value);
+        v.setTextColor(Color.WHITE);
+        v.setTextSize(12);
+        v.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(v);
+        return row;
+    }
+
+    private String formatLatency(int ms) {
+        if (ms <= 0) return "-";
+        if (ms < 1000) return ms + "毫秒";
+        return (Math.round(ms / 100f) / 10f) + "秒";
     }
 
     private View barRow(String label, int percent) {
@@ -249,26 +414,31 @@ public class MainActivity extends Activity {
     }
 
     private void syncInBackground(final boolean manual) {
-        if (!manual) {
-            if (!isOnline()) return;
+        if (!isOnline()) {
+            if (manual) {
+                statusText.setText("offline. showing local data.");
+                Toast.makeText(this, "offline. showing local data.", Toast.LENGTH_SHORT).show();
+            }
+            // auto-sync: skip silently when offline (no WiFi wake / wasted e-ink refresh)
+            return;
         }
         final SyncService svc = new SyncService(this);
-        if (!manual && svc.getBaseUrl().length() == 0) {
+        if (!manual && (svc.getBaseUrl() == null || svc.getBaseUrl().length() == 0)) {
             statusText.setText("> discovering server...");
             startDiscovery();
             return;
         }
         if (manual) statusText.setText("> syncing...");
-        new AsyncTask<Void, Void, SyncResult>() {
+        if (activeSyncTask != null) activeSyncTask.cancel(true);
+        activeSyncTask = new AsyncTask<Void, Void, SyncResult>() {
             @Override protected SyncResult doInBackground(Void... v) {
                 return svc.performSync();
             }
             @Override protected void onPostExecute(SyncResult result) {
+                activeSyncTask = null;
+                if (!isActivityAlive() || isCancelled()) return;
                 renderLocal();
-                new AsyncTask<Void,Void,List<UsageProvider>>() {
-                    protected List<UsageProvider> doInBackground(Void...x) { return svc.fetchUsage(); }
-                    protected void onPostExecute(List<UsageProvider> u) { renderUsage(u); }
-                }.execute();
+                fetchUsageAsync(svc);
                 if (!result.success && manual && result.userMessage != null
                         && result.userMessage.contains("no server configured")) {
                     statusText.setText("> discovering server...");
@@ -283,24 +453,47 @@ public class MainActivity extends Activity {
         }.execute();
     }
 
+    private void fetchUsageAsync(final SyncService svc) {
+        if (!isActivityAlive()) return;
+        if (activeUsageTask != null) activeUsageTask.cancel(true);
+        activeUsageTask = new AsyncTask<Void, Void, List<UsageProvider>>() {
+            @Override protected List<UsageProvider> doInBackground(Void... x) {
+                return svc.fetchUsage();
+            }
+            @Override protected void onPostExecute(List<UsageProvider> u) {
+                activeUsageTask = null;
+                if (!isActivityAlive() || isCancelled()) return;
+                renderUsage(u);
+            }
+        }.execute();
+    }
+
     private void startDiscovery() {
+        if (!isOnline()) {
+            statusText.setText("offline. cannot discover.");
+            return;
+        }
         if (discovery != null && discovery.isRunning()) return;
+        if (discovery != null) discovery.stop();
         discovery = new ServerDiscovery(new ServerDiscovery.DiscoveryCallback() {
             @Override public void onServerFound(final String host, final int port) {
                 runOnUiThread(new Runnable() {
                     @Override public void run() {
+                        if (!isActivityAlive()) return;
                         final SyncService svc = new SyncService(MainActivity.this);
                         svc.updateBaseUrl(host, port);
                         statusText.setText("> discovered " + host + ":" + port);
-                        new AsyncTask<Void,Void,SyncResult>() {
-                            protected SyncResult doInBackground(Void...v) { return svc.performSync(); }
-                            protected void onPostExecute(SyncResult r) {
+                        if (activeSyncTask != null) activeSyncTask.cancel(true);
+                        activeSyncTask = new AsyncTask<Void, Void, SyncResult>() {
+                            @Override protected SyncResult doInBackground(Void... v) {
+                                return svc.performSync();
+                            }
+                            @Override protected void onPostExecute(SyncResult r) {
+                                activeSyncTask = null;
+                                if (!isActivityAlive() || isCancelled()) return;
                                 renderLocal();
                                 if (r.userMessage != null) statusText.setText(r.userMessage);
-                                new AsyncTask<Void,Void,List<UsageProvider>>() {
-                                    protected List<UsageProvider> doInBackground(Void...x) { return svc.fetchUsage(); }
-                                    protected void onPostExecute(List<UsageProvider> u) { renderUsage(u); }
-                                }.execute();
+                                fetchUsageAsync(svc);
                             }
                         }.execute();
                     }
@@ -308,7 +501,10 @@ public class MainActivity extends Activity {
             }
             @Override public void onDiscoveryFailed(final String reason) {
                 runOnUiThread(new Runnable() {
-                    @Override public void run() { statusText.setText("> discovery: " + reason); }
+                    @Override public void run() {
+                        if (!isActivityAlive()) return;
+                        statusText.setText("> discovery: " + reason);
+                    }
                 });
             }
         });

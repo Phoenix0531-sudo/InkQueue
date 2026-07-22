@@ -1,90 +1,50 @@
-# InkQueue 优化建议清单
+# InkQueue 优化建议清单（2026-07-21 更新）
 
-## P0 — 必须改（错误/缺陷）
+> 旧版（含 OpenCode 重复代码、Usage 仪表盘未实现、/v1/usage 无缓存）已过时。
+> 401 Codex 账号文件**不由 InkQueue 删除**——由 CLIProxyAPI / CPAMP / 账号管理侧自行清理；
+> InkQueue 只做探活并显示「可用 / 失效」。
 
-### 1. fetchOpenCodeUsage() 代码重复
-- **位置:** `server/src/server.js:76-93`
-- **问题:** try/catch 分支中的 fallback 返回数据完全一样，代码重复 3 次
-- **建议:** 提取 `const FALLBACK = {...}` 常量
+## 已完成（本轮）
 
-### 2. Auth0 client_id 未经验证
-- **位置:** `server/src/server.js:112`
-- **问题:** 硬编码 `p2gNDZ5pN4P6TMg7bT6Xg8T8T8T8T8T8T8T8T8`，如果其他 Codex 版本用了不同 client_id 则 refresh 失败
-- **建议:** 从 Auth0 配置中读取，或尝试从 `auth.json` 的 `audience`/`scope` 推断
+- [x] Codex 探活：`codex_enabled` = 真实可用数，不是 auth 文件数
+- [x] 额度窗口按 `limit_window_seconds` 标注（当前 Plus 为 **7 天**，禁止硬编码 5h）
+- [x] CPA-only `/v1/usage`，Kindle 中文小仪表盘
+- [x] AsyncTask `isFinishing` / cancel + discovery `onDestroy` 关 socket
+- [x] 同步前网络检查（离线跳过 auto-sync）
+- [x] pending op 重试上限（10 次后丢弃，避免堵队列）
+- [x] 时区固定 `Asia/Shanghai`（Android + server `nowIso`）
+- [x] 空密钥统计行不展示
+- [x] `scripts/server-ctl.js` start/stop/restart（**只认 `INKQUEUE_PORT`，不读通用 `PORT`**）
+- [x] `scripts/seed-sample-tasks.js` 样例任务
+- [x] Codex 解析 / 探活计数单测
+- [x] 文档对齐 README / api.md；容量文案去掉「5h」
 
-### 3. MainActivity 没有 onDestroy 清理
-- **位置:** `MainActivity.java:167-193`
-- **问题:** `ServerDiscovery` 持有 UDP socket，Activity 销毁时不会自动停止；可能在后台持续发广播
-- **建议:** 在 `onDestroy()` 中调用 `if (discovery != null) discovery.stop()`
+## 与 CPAMP 的边界
 
-### 4. Server 启动时没有验证 config.json
-- **位置:** `server.js`
-- **问题:** config.json 缺失或格式损坏时静默忽略，不报错
-- **建议:** 启动时验证 config.json，如果缺少 opencode_api_key 则打印 warning
+- CPA 已托管 **CPA Manager Plus** 面板（`config.yaml` → `panel-github-repository: seakee/CPA-Manager-Plus`，入口 `http://127.0.0.1:18317/management.html`）。
+- InkQueue **不替代** CPAMP：不删账号、不改 auth 目录、不负责账号巡检自动化。
+- InkQueue 只从本机 `auth-dir` + `/v1/models`（+ 可选 Management API）读状态给 Kindle。
+- Management 密钥：明文写在 `server/data/config.json` 的 `cliproxy_management_key`，须与 CPA 启动时 bcrypt 哈希前的 secret 一致；错误密钥会导致 401，连错多次会 IP 临时 ban（约 30 分钟）。
 
----
+## 当前环境观察（2026-07-21 晚）
 
-## P1 — 建议改（性能/健壮性）
+- `~/.cli-proxy-api`：**1000 个 xai 文件，0 个 codex**；`dead/` 下也是 xai（无 codex）。
+- 因此 `/v1/usage` 显示 **Codex 可用 0** 是诚实结果，不是探测 bug。
+- Management API：`mg-cliproxy-local` 当前返回 `invalid management key`；多次失败后出现 `IP banned ... 30m`。
+  - 解 ban / 重设 secret 在 **CLIProxy / CPAMP 侧**做，InkQueue 不改 CPA 配置。
+- 账号池仍够用（Grok 1000）。
 
-### 5. /v1/usage 无缓存
-- **位置:** `server.js:340`
-- **问题:** 每次调用都发起 2 次外部 HTTP 请求；OpenCode API 如果将来上线，每次都要 200ms+
-- **建议:** 加 30 秒内存缓存，`fetchUsage()` 检查缓存是否过期再决定是否重新请求
+## 不在本项目处理
 
-### 6. bonjour 应改为 optionalDependencies
-- **位置:** `server/package.json`
-- **问题:** `bonjour` 在 `dependencies` 中，但它不是核心功能（只是 mDNS 发现额外通道，且已有 UDP 兜底）
-- **建议:** 移到 `optionalDependencies`，`npm install` 出错也不会导致安装失败
+- 删除 / 禁用 CLIProxy `~/.cli-proxy-api` 里 401 的 Codex 文件  
+  → 交给 CLIProxyAPI / CPAMP / 账号导入脚本；文件消失后 InkQueue 自动不再计入。
+- Grok 单账号「剩余 %」（接口无稳定等价字段）
+- 每日简报 / RSS / 招聘雷达
+- 重置 CPA management secret / 解 IP ban（在 CPA 侧操作）
 
-### 7. expandHome() 在 Windows 有坑
-- **位置:** `server.js:96`
-- **问题:** `~` 在 Git Bash 中已经被展开，但 cmd/powershell 中需要 `%USERPROFILE%`
-- **建议:** 用 `os.homedir()` 替代手工处理（Node 内置方法，跨平台）
+## 后续可选（P2）
 
-### 8. Android AsyncTask 没有取消机制
-- **位置:** `MainActivity.java:147-164` 及其他多处
-- **问题:** Activity 销毁后 AsyncTask 仍可能执行 `onPostExecute`，尝试更新已销毁的 View
-- **建议:** 检查 `isFinishing()` 或使用弱引用
-
-### 9. 没有网络检查就同步
-- **位置:** `MainActivity.java:139`
-- **问题:** 自动同步时没有检查 WiFi 是否在线，墨水屏可能徒劳唤醒 WiFi 并浪费电
-- **建议:** `syncInBackground` 前检查 `ConnectivityManager`，离线直接跳过
-
-### 10. Server/usage 错误键名不一致
-- **位置:** `server.js:68, 132, 145, 161, 164, 169`
-- **问题:** 有的返回 `error: 'string'`，有的返回 `windows: {}`，有的返回 `data: {...}`。Android 端解析时难以统一处理
-- **建议:** 统一返回格式：`{ provider, error, data, windows }`，`data` 放结构化结果，`windows` 放降级数据
-
----
-
-## P2 — 可做但优先级低
-
-### 11. config.json 中 token 明文存储
-- **问题:** OpenCode API key 和未来可能加的其他 key 明存放在 JSON 文件中
-- **建议:** 如果做生产部署，用环境变量更安全。目前仅局域网使用，风险可控
-
-### 12. 缺少 instrumented SQLite 测试
-- **问题:** `TaskRepository` 依赖 Android SQLite，只能在真机/模拟器上跑
-- **建议:** 后续可加 `androidTest` 测试
-
-### 13. Server 缺少 /v1/usage 的单元测试
-- **建议:** 在 `server/test/api.test.js` 中加 `/v1/usage` 的基本请求测试（mock 外部 API）
-
-### 14. 首页 Usage 仪表盘未实现
-- **建议:** 后续开发：在标题下方加 UsageAdapter 展示用量百分比条
-
-### 15. AlarmManager 定时刷新未实现
-- **建议:** 后续开发：每隔 N 分钟自动 SyncService + fetchUsage
-
----
-
-## 优先级排序
-
-```
-立即：P0#1(去重) + P0#3(onDestroy) + P0#4(启动验证)
-   ↓
-下轮：P1#5(缓存) + P1#6(optional deps) + P1#7(expandHome) + P1#9(网络检查)
-   ↓
-以后：P1#8(AsyncTask) + P2 项
-```
+- Android instrumented SQLite 测试
+- 生产 HTTPS + 非 `dev-token`
+- AlarmManager 定时静默同步（注意墨水屏耗电）
+- Agent 侧固定写任务 prompt 模板再精修

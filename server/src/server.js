@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const os = require('os');
 const https = require('https');
 const tls = require('tls');
+const cliproxy = require('./cliproxy');
 
 const DEFAULT_PORT = Number(process.env.INKQUEUE_PORT || 8787);
 const DISCOVERY_PORT = Number(process.env.INKQUEUE_DISCOVERY_PORT || 48787);
@@ -117,7 +118,7 @@ function readFromCCSwitchDB() {
 }
 
 let usageCache = { data: null, timestamp: 0 };
-const USAGE_CACHE_TTL = 30000;
+const USAGE_CACHE_TTL = 8000;
 // Proxy: HTTP CONNECT tunnel with retry (handles Clash node flakiness)
 function proxiedFetch(url, options = {}, retries = 2) {
   return new Promise((resolve, reject) => {
@@ -197,13 +198,23 @@ class HttpError extends Error {
 }
 
 function nowIso() {
+  // Product timezone is always Asia/Shanghai (+08:00). Do not follow host TZ.
   const d = new Date();
-  const pad = (n) => String(Math.abs(n)).padStart(2, '0');
-  const offsetMinutes = -d.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? '+' : '-';
-  const hh = pad(Math.trunc(Math.abs(offsetMinutes) / 60));
-  const mm = pad(Math.abs(offsetMinutes) % 60);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${hh}:${mm}`;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(d);
+  const get = (type) => {
+    const p = parts.find((x) => x.type === type);
+    return p ? p.value : '00';
+  };
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}+08:00`;
 }
 
 function ensureDataFile() {
@@ -352,61 +363,309 @@ function parseCodexResponse(json) {
   return { provider: 'chatgpt-plus', error: null, data: { primary, secondary } };
 }
 
-async function fetchUsage() {
+function sumByTypeField(byType, field) {
+  return Object.values(byType || {}).reduce((n, v) => n + Number((v && v[field]) || 0), 0);
+}
+
+function formatLatencyMs(ms) {
+  const n = Number(ms || 0);
+  if (!n || n < 0) return null;
+  if (n < 1000) return n + '毫秒';
+  return (Math.round(n / 100) / 10) + '秒';
+}
+
+function formatCompactNumber(n) {
+  const v = Number(n || 0);
+  if (v >= 10000) return Math.round(v / 1000) / 10 + '万';
+  if (v >= 1000) return Math.round(v / 100) / 10 + '千';
+  return String(v);
+}
+
+function summarizeApiKeyUsage(raw) {
+  if (!raw) return null;
+  // CPA may return {} when empty, an object map, or an array.
+  if (Array.isArray(raw)) {
+    if (!raw.length) return null;
+    return {
+      key_count: raw.length,
+      // do not dump secrets; only coarse totals if present
+      total_requests: raw.reduce((n, item) => n + Number(item.requests || item.count || item.total || 0), 0),
+      total_tokens: raw.reduce((n, item) => n + Number(
+        (item.tokens && (item.tokens.total_tokens || item.tokens.total)) || item.total_tokens || 0
+      ), 0)
+    };
+  }
+  if (typeof raw !== 'object') return null;
+  const keys = Object.keys(raw);
+  if (!keys.length) return null;
+  let totalRequests = 0;
+  let totalTokens = 0;
+  for (const k of keys) {
+    const v = raw[k] || {};
+    totalRequests += Number(v.requests || v.count || v.total || 0);
+    totalTokens += Number(
+      (v.tokens && (v.tokens.total_tokens || v.tokens.total)) || v.total_tokens || 0
+    );
+  }
+  return {
+    key_count: keys.length,
+    total_requests: totalRequests,
+    total_tokens: totalTokens
+  };
+}
+
+function summarizeUsageQueue(raw) {
+  let items = [];
+  if (Array.isArray(raw)) items = raw;
+  else if (raw && Array.isArray(raw.queue)) items = raw.queue;
+  else if (raw && Array.isArray(raw.items)) items = raw.items;
+  else if (raw && Array.isArray(raw.data)) items = raw.data;
+  if (!items.length) return null;
+
+  // Keep only a compact recent window for Kindle.
+  const recent = items.slice(0, 20);
+  const fails = recent.filter((i) => i && (i.failed === true || i.fail && i.fail.status_code >= 400)).length;
+  const latencies = recent.map((i) => Number(i && i.latency_ms || 0)).filter((n) => n > 0);
+  const avgLatency = latencies.length
+    ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+    : 0;
+  const last = recent[0] || {};
+  return {
+    count: items.length,
+    recent: recent.length,
+    fails,
+    avg_latency_ms: avgLatency,
+    last_model: last.model || last.alias || null,
+    last_provider: last.provider || null,
+    last_failed: Boolean(last.failed),
+    last_latency_ms: Number(last.latency_ms || 0)
+  };
+}
+
+function summarizeCodexUsage(list) {
+  const items = Array.isArray(list) ? list : [];
+  if (!items.length) return null;
+  const alive = [];
+  const dead = [];
+  for (const it of items) {
+    if (!it) continue;
+    if (it.error || !it.data) dead.push(it);
+    else alive.push(it);
+  }
+  // Pick the healthiest / lowest usage among alive for a short headline.
+  // Label MUST come from API window length (limit_window_seconds), never hardcode "5小时".
+  let best = null;
+  for (const it of alive) {
+    const primary = it.data && it.data.primary ? it.data.primary : null;
+    const pct = Number(
+      (primary && primary.usage_percent) ||
+      (it.data && it.data.windows && it.data.windows.rolling && it.data.windows.rolling.usage_percent) ||
+      0
+    );
+    const label = (primary && primary.label) || null;
+    const limitSeconds = primary && primary.limit_window_seconds != null
+      ? Number(primary.limit_window_seconds)
+      : null;
+    const resetAfter = primary && primary.reset_after_seconds != null
+      ? Number(primary.reset_after_seconds)
+      : null;
+    if (!best || pct < best.usage_percent) {
+      best = {
+        email: it.email || it.id || 'codex',
+        usage_percent: pct,
+        label: label,
+        limit_window_seconds: limitSeconds,
+        reset_after_seconds: resetAfter,
+        plan_type: it.data && it.data.plan_type ? it.data.plan_type : null,
+        allowed: it.data && it.data.allowed != null ? it.data.allowed : null,
+        limit_reached: it.data && it.data.limit_reached != null ? it.data.limit_reached : null
+      };
+    }
+  }
+  return {
+    alive: alive.length,
+    dead: dead.length,
+    total: items.length,
+    best,
+    // compact per-account for Android (no tokens)
+    accounts: items.map((it) => {
+      const primary = it.data && it.data.primary ? it.data.primary : null;
+      return {
+        email: it.email || it.id || null,
+        ok: !it.error && !!it.data,
+        error: it.error || null,
+        usage_percent: primary ? Number(primary.usage_percent || 0) : null,
+        label: primary ? (primary.label || null) : null,
+        limit_window_seconds: primary && primary.limit_window_seconds != null
+          ? Number(primary.limit_window_seconds)
+          : null,
+        plan_type: it.data && it.data.plan_type ? it.data.plan_type : null
+      };
+    })
+  };
+}
+
+function buildCliproxyProvider(snapshot) {
+  const summary = (snapshot.pool && snapshot.pool.summary) || { total: 0, by_type: {}, capacity: {} };
+  const health = snapshot.health || {};
+  const capacity = summary.capacity || {};
+  const byType = summary.by_type || {};
+  const runtime = snapshot.runtime || null;
+  const mgmt = snapshot.management_api || {};
+  const codexHealth = snapshot.codex_health || {};
+  const codexSummary = summarizeCodexUsage(snapshot.codex_usage || []);
+  // Prefer pool capacity over fragile single-account 5h percent when accounts are abundant.
+  const enough = Boolean(capacity.enough);
+  // Prefer probe-reconciled usable Codex count when available.
+  const codexEnabled = Number(
+    (codexSummary && codexSummary.alive != null ? codexSummary.alive : null) ??
+    capacity.codex_enabled ??
+    (byType.codex && byType.codex.enabled) ??
+    0
+  );
+  const codexDead = Number(
+    (codexSummary && codexSummary.dead != null ? codexSummary.dead : null) ??
+    capacity.codex_dead ??
+    (byType.codex && byType.codex.probe_dead) ??
+    0
+  );
+  const codexFileTotal = Number((byType.codex && byType.codex.total) || (codexSummary && codexSummary.total) || 0);
+  const xaiEnabled = Number(capacity.xai_enabled || (byType.xai && byType.xai.enabled) || 0);
+  const total = Number(summary.total || 0);
+  const success = runtime ? Number(runtime.total_success || 0)
+    : Number((byType.codex && byType.codex.success) || 0) + Number((byType.xai && byType.xai.success) || 0);
+  const failed = runtime ? Number(runtime.total_failed || 0)
+    : Number((byType.codex && byType.codex.failed) || 0) + Number((byType.xai && byType.xai.failed) || 0);
+  const unavailable = Number((byType.codex && byType.codex.unavailable) || 0)
+    + Number((byType.xai && byType.xai.unavailable) || 0);
+  const disabled = sumByTypeField(byType, 'disabled');
+  const tokenExpired = sumByTypeField(byType, 'token_expired');
+  const modelCount = Number(health.model_count || 0);
+  const latencyMs = Number(health.latency_ms || 0);
+  const latencyLabel = formatLatencyMs(latencyMs);
+  const apiKeyUsage = summarizeApiKeyUsage(mgmt.api_key_usage);
+  const usageQueue = summarizeUsageQueue(mgmt.usage_queue);
+
+  // Kindle 中文小仪表盘（白底黑字可读，少缩写）
+  const statusText = health.ok ? '正常' : '异常';
+  const stockText = enough ? '够用' : '偏少';
+  const codexLine = codexDead > 0
+    ? ('Codex 可用 ' + codexEnabled + (codexFileTotal ? ('/' + codexFileTotal) : '') + ' · 失效 ' + codexDead)
+    : ('Codex 可用 ' + codexEnabled);
+  const lines = [
+    '状态：' + statusText + (latencyLabel ? ('  延迟 ' + latencyLabel) : ''),
+    '账号池：' + total + ' 个  ' + stockText,
+    '  ' + codexLine + ' · Grok ' + xaiEnabled,
+    // Only show what the API actually returned (window label from limit_window_seconds).
+    codexSummary && codexSummary.best
+      ? ('  有效号额度 '
+        + Math.round(codexSummary.best.usage_percent) + '%'
+        + (codexSummary.best.label ? ('（' + codexSummary.best.label + '）') : '')
+        + (codexSummary.best.limit_reached ? ' 已触顶' : ''))
+      : null,
+    '运行：累计 ' + formatCompactNumber(success) + ' 次成功'
+      + '  ' + formatCompactNumber(failed) + ' 次失败'
+      + (unavailable ? ('  异常账号 ' + unavailable) : ''),
+    (disabled > 0 || tokenExpired > 0)
+      ? ('账号：禁用 ' + disabled + '  过期 ' + tokenExpired
+        + (modelCount > 0 ? ('  模型 ' + modelCount) : ''))
+      : (modelCount > 0 ? ('模型：' + modelCount) : null),
+    usageQueue
+      ? ('最近：' + usageQueue.recent + ' 次'
+        + '  失败 ' + usageQueue.fails
+        + (usageQueue.avg_latency_ms ? ('  均 ' + formatLatencyMs(usageQueue.avg_latency_ms)) : ''))
+      : null,
+    usageQueue && usageQueue.last_model
+      ? ('  最近模型 ' + String(usageQueue.last_model).slice(0, 22))
+      : null,
+    // Only show api-key-usage when CPA actually reports numbers (usually empty).
+    apiKeyUsage
+      ? ('密钥：' + apiKeyUsage.key_count + ' 个'
+        + (apiKeyUsage.total_requests ? ('  请求 ' + formatCompactNumber(apiKeyUsage.total_requests)) : '')
+        + (apiKeyUsage.total_tokens ? ('  用量 ' + formatCompactNumber(apiKeyUsage.total_tokens)) : ''))
+      : null
+  ].filter(Boolean);
+
+  return {
+    provider: 'cliproxyapi',
+    error: health.ok ? null : (health.error || 'cliproxy_down'),
+    source: snapshot.source || 'cliproxyapi-auth-dir',
+    data: {
+      plan: 'account-pool',
+      display: 'pool',
+      health,
+      pool: {
+        total,
+        by_type: byType,
+        capacity,
+        // Keep accounts out of Kindle payload by default (admin/pool still has them).
+        accounts: []
+      },
+      runtime: runtime || {
+        total_success: success,
+        total_failed: failed
+      },
+      enough,
+      lines,
+      // Compact fields for simple clients
+      codex_enabled: codexEnabled,
+      codex_dead: codexDead,
+      codex_total: codexFileTotal,
+      xai_enabled: xaiEnabled,
+      total_accounts: total,
+      success,
+      failed,
+      unavailable,
+      disabled,
+      token_expired: tokenExpired,
+      model_count: modelCount,
+      latency_ms: latencyMs,
+      api_key_usage: apiKeyUsage,
+      usage_queue: usageQueue,
+      codex_quota: codexSummary,
+      // Compatibility: no progress-bar semantics for CPA pool
+      windows: {},
+      codex_usage: snapshot.codex_usage || []
+    }
+  };
+}
+
+async function fetchUsage(options) {
   const now = Date.now();
-  if (usageCache.data && (now - usageCache.timestamp) < USAGE_CACHE_TTL) {
+  const opts = options || {};
+  if (!opts.force && usageCache.data && (now - usageCache.timestamp) < USAGE_CACHE_TTL) {
     return usageCache.data;
   }
-  const [go, codex] = await Promise.all([fetchOpenCodeUsage(), fetchCodexUsage()]);
-
-  // Merge CC Switch data (most accurate cost tracking)
-  const ccData = readFromCCSwitchDB();
-  if (ccData) {
-    for (const [appType, windows] of Object.entries(ccData.providers)) {
-      if (appType === 'opencode' || appType === 'codex' || appType === 'claude') {
-        const provider = appType === 'opencode' ? go : codex;
-        provider.source = (provider.source || '') + '+ccswitch';
-        provider.data = provider.data || { plan: appType, windows: {} };
-        for (const [win, data] of Object.entries(windows)) {
-          if (!provider.data.windows[win]) provider.data.windows[win] = { label: win, resets_in_seconds: 3600 };
-          provider.data.windows[win].cc_cost = data.cost;
-          provider.data.windows[win].cc_tokens = data.tokens;
-        }
-      }
-    }
-  }
-
-  // Merge reported usage into opencode-go data
   const config = readConfig();
-  const reports = config.usage_reports || [];
-  const openCodeReports = reports.filter(r => r.provider === 'opencode-go');
-  if (openCodeReports.length > 0) {
-    go.source = (go.source || 'fallback') + '+reports';
-    go.data = go.data || { plan: 'go', windows: {} };
-    // Sum reports
-    const reportWindows = {
-      rolling: { start: now - 5 * 3600 * 1000, total: 0, label: '5-hour' },
-      weekly: { start: now - 7 * 24 * 3600 * 1000, total: 0, label: 'weekly' },
-      monthly: { start: now - 30 * 24 * 3600 * 1000, total: 0, label: 'monthly' }
-    };
-    let totalReportCost = 0;
-    for (const r of openCodeReports) {
-      const reportedAt = new Date(r.reported_at).getTime();
-      totalReportCost += (r.cost || 0);
-      for (const [, w] of Object.entries(reportWindows)) {
-        if (reportedAt >= w.start) w.total += (r.cost || 0);
-      }
-    }
-    for (const [key, w] of Object.entries(reportWindows)) {
-      if (!go.data.windows[key]) go.data.windows[key] = { label: w.label, max_cost: 60, resets_in_seconds: 3600 };
-      const maxCost = go.data.windows[key].max_cost || 60;
-      go.data.windows[key].usage_percent = Math.min(Math.round(w.total / maxCost * 100), 100);
-      go.data.windows[key].reported_cost = Math.round(w.total * 100) / 100;
-    }
-    go.data.total_reported_cost = Math.round(totalReportCost * 100) / 100;
-  }
+  // Always probe Codex health so dead (401) accounts are not counted as usable.
+  // includeCodexUsage only controls whether full per-account quota is emphasized;
+  // probe itself is on by default for accurate Codex usable count.
+  const includeCodexUsage = opts.includeCodexUsage === true;
+  const cpaSnap = await cliproxy.fetchCliproxySnapshot(config, {
+    includeCodexUsage: true,
+    probeCodex: true,
+    maxCodex: 5
+  });
+  const cliproxyProvider = buildCliproxyProvider(cpaSnap);
 
-  usageCache = { data: { server_time: nowIso(), providers: [go, codex] }, timestamp: now };
+  usageCache = {
+    data: {
+      server_time: nowIso(),
+      providers: [cliproxyProvider],
+      cliproxy: {
+        health: cpaSnap.health,
+        pool: cpaSnap.pool && {
+          ok: cpaSnap.pool.ok,
+          error: cpaSnap.pool.error,
+          summary: cpaSnap.pool.summary
+        },
+        enough: cpaSnap.enough,
+        management_api: cpaSnap.management_api,
+        runtime: cpaSnap.runtime || null
+      }
+    },
+    timestamp: now
+  };
   return usageCache.data;
 }
 
@@ -525,6 +784,14 @@ function applyPostpone(task, op, serverTime) {
   task.updated_at = serverTime;
 }
 
+function tokenFromQuery(url) {
+  return url.searchParams.get('token') || url.searchParams.get('inkqueue_token') || '';
+}
+
+function hasTokenOrQuery(req, url) {
+  return hasToken(req) || tokenFromQuery(url) === TOKEN;
+}
+
 async function handleRequest(req, res) {
   const url = new URL(req.url, 'http://localhost');
 
@@ -532,32 +799,65 @@ async function handleRequest(req, res) {
     sendJson(res, 200, { ok: true }); return;
   }
 
+  // Lightweight browser admin panel for CLIProxy pool/health (token via query for e-ink browsers).
+  if (req.method === 'GET' && (url.pathname === '/admin/cliproxy' || url.pathname === '/admin')) {
+    if (!hasTokenOrQuery(req, url)) {
+      sendJson(res, 401, { error: 'unauthorized' }); return;
+    }
+    const config = readConfig();
+    const includeCodexUsage = url.searchParams.get('codex_usage') === '1';
+    const snapshot = await cliproxy.fetchCliproxySnapshot(config, {
+      includeCodexUsage,
+      maxCodex: 5
+    });
+    const html = cliproxy.buildAdminHtml(snapshot);
+    const encoded = Buffer.from(html, 'utf8');
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': encoded.length,
+      'Cache-Control': 'no-store'
+    });
+    res.end(encoded);
+    return;
+  }
+
   if (!hasToken(req)) {
     sendJson(res, 401, { error: 'unauthorized' }); return;
   }
 
   if (req.method === 'GET' && url.pathname === '/v1/usage') {
-    sendJson(res, 200, await fetchUsage()); return;
+    const includeCodexUsage = url.searchParams.get('codex_usage') === '1';
+    const force = url.searchParams.get('force') === '1' || includeCodexUsage;
+    sendJson(res, 200, await fetchUsage({ includeCodexUsage, force })); return;
   }
 
-  // Agent usage reporting endpoint
-  if (req.method === 'POST' && url.pathname === '/v1/usage/report') {
-    const input = await readBody(req);
-    const cfg = readConfig();
-    const reports = cfg.usage_reports || [];
-    reports.push({
-      provider: input.provider || 'opencode-go',
-      cost: input.cost || 0,
-      tokens_input: input.tokens_input || 0,
-      tokens_output: input.tokens_output || 0,
-      model: input.model || 'unknown',
-      reported_at: nowIso(),
-      note: input.note || ''
+  if (req.method === 'GET' && url.pathname === '/v1/cliproxy/health') {
+    const config = readConfig();
+    const health = await cliproxy.probeCliproxyHealth(config);
+    const management = await cliproxy.fetchManagementSnapshot(config);
+    sendJson(res, 200, {
+      server_time: nowIso(),
+      ok: health.ok,
+      health,
+      management_api: {
+        enabled: management.enabled,
+        ok: management.ok,
+        reason: management.reason,
+        auth_status: management.auth_status,
+        usage_statistics_enabled: management.usage_statistics_enabled
+      }
     });
-    if (reports.length > 1000) reports.splice(0, reports.length - 1000);
-    cfg.usage_reports = reports;
-    try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2)); } catch(e) {}
-    sendJson(res, 200, { ok: true, total_reports: reports.length });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/v1/cliproxy/pool') {
+    const config = readConfig();
+    const includeCodexUsage = url.searchParams.get('codex_usage') === '1';
+    const snapshot = await cliproxy.fetchCliproxySnapshot(config, {
+      includeCodexUsage,
+      maxCodex: 5
+    });
+    sendJson(res, 200, snapshot);
     return;
   }
 
@@ -641,17 +941,26 @@ function start(port = DEFAULT_PORT, callback) {
   return server;
 }
 
-if (require.main === module) {
-  // Validate config.json on startup
+function validateStartupConfig(configFile = CONFIG_FILE, logger = console) {
+  let config;
   try {
-    JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
   } catch (e) {
     if (e.code === 'ENOENT') {
-      console.log('Config: no config.json found, /v1/usage will return fallback data');
+      logger.warn('Config: no config.json found, /v1/usage will return fallback data');
     } else {
-      console.warn('Config: config.json parse error:', e.message);
+      logger.warn('Config: config.json parse error:', e.message);
     }
+    return;
   }
+
+  if (!config || typeof config !== 'object' || !config.opencode_api_key) {
+    logger.warn('Config: opencode_api_key is missing, /v1/usage will return fallback data');
+  }
+}
+
+if (require.main === module) {
+  validateStartupConfig();
 
   start(DEFAULT_PORT, () => {
     console.log(`InkQueue reference server listening on http://localhost:${DEFAULT_PORT}`);
@@ -695,4 +1004,13 @@ function getLocalIP() {
   return '127.0.0.1';
 }
 
-module.exports = { createServer, start, readStore, writeStore, nowIso, fetchUsage };
+module.exports = {
+  createServer,
+  start,
+  readStore,
+  writeStore,
+  nowIso,
+  fetchUsage,
+  validateStartupConfig,
+  cliproxy
+};

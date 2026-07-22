@@ -13,6 +13,7 @@ public class ServerDiscovery {
     private final DiscoveryCallback callback;
     private Thread thread;
     private volatile boolean running = false;
+    private volatile DatagramSocket socket;
 
     public interface DiscoveryCallback {
         void onServerFound(String host, int port);
@@ -34,6 +35,9 @@ public class ServerDiscovery {
                 } catch (Exception e) {
                     Log.w(TAG, "discovery error", e);
                     if (running) callback.onDiscoveryFailed(e.toString());
+                } finally {
+                    closeSocket();
+                    running = false;
                 }
             }
         });
@@ -42,24 +46,23 @@ public class ServerDiscovery {
     }
 
     private void discover() throws Exception {
-        DatagramSocket socket = new DatagramSocket();
-        socket.setBroadcast(true);
-        socket.setSoTimeout(TIMEOUT_MS);
+        DatagramSocket s = new DatagramSocket();
+        socket = s;
+        s.setBroadcast(true);
+        s.setSoTimeout(TIMEOUT_MS);
 
-        // Send broadcast ping
         byte[] ping = "InkQueue:ping".getBytes("UTF-8");
         InetAddress broadcast = InetAddress.getByName("255.255.255.255");
-        socket.send(new DatagramPacket(ping, ping.length, broadcast, DISCOVERY_PORT));
+        s.send(new DatagramPacket(ping, ping.length, broadcast, DISCOVERY_PORT));
 
         Log.i(TAG, "broadcast sent to 255.255.255.255:" + DISCOVERY_PORT);
 
-        // Listen for pong response
         byte[] buf = new byte[256];
         long deadline = System.currentTimeMillis() + TIMEOUT_MS;
         while (running && System.currentTimeMillis() < deadline) {
             try {
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                socket.receive(packet);
+                s.receive(packet);
                 String msg = new String(packet.getData(), 0, packet.getLength(), "UTF-8");
                 Log.i(TAG, "received: " + msg + " from " + packet.getAddress().getHostAddress());
                 if (msg.startsWith("InkQueue:pong:")) {
@@ -68,22 +71,37 @@ public class ServerDiscovery {
                         String ip = parts[2];
                         int port = Integer.parseInt(parts[3]);
                         Log.i(TAG, "discovered server at " + ip + ":" + port);
-                        socket.close();
-                        callback.onServerFound(ip, port);
+                        closeSocket();
+                        if (running) callback.onServerFound(ip, port);
                         return;
                     }
                 }
             } catch (java.net.SocketTimeoutException e) {
                 break;
+            } catch (java.net.SocketException e) {
+                // socket closed by stop()
+                break;
             }
         }
-        socket.close();
+        closeSocket();
         if (running) callback.onDiscoveryFailed("no response within " + TIMEOUT_MS + "ms");
+    }
+
+    private void closeSocket() {
+        DatagramSocket s = socket;
+        socket = null;
+        if (s != null) {
+            try { s.close(); } catch (Exception ignored) {}
+        }
     }
 
     public void stop() {
         running = false;
-        if (thread != null) thread.interrupt();
+        closeSocket();
+        if (thread != null) {
+            thread.interrupt();
+            thread = null;
+        }
     }
 
     public boolean isRunning() { return running; }

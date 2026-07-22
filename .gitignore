@@ -8,5 +8,18 @@ android/app/build/
 android/local.properties
 server/node_modules/
 server/data/*.tmp
+server/data/config.json
+server/data/server.pid
+server/data/server.log
+.tmp-cpa/
 *.log
 .DS_Store
+
+# local runtime
+server/data/tmp/
+server/data/preferred-port.txt
+server/data/_usage_last.json
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/

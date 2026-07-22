@@ -124,8 +124,19 @@ public class TaskRepository {
     }
 
     public List<PendingOperation> getPendingOperations() {
+        return getPendingOperations(Integer.MAX_VALUE);
+    }
+
+    /** Pending ops with retry_count &lt; maxRetry (ops that still may be uploaded). */
+    public List<PendingOperation> getPendingOperations(int maxRetry) {
         SQLiteDatabase db = helper.getReadableDatabase();
-        Cursor cursor = db.query("pending_operations", null, null, null, null, null, "created_at ASC");
+        Cursor cursor = db.query(
+                "pending_operations",
+                null,
+                "retry_count < ?",
+                new String[]{String.valueOf(maxRetry)},
+                null, null,
+                "created_at ASC");
         try {
             List<PendingOperation> out = new ArrayList<PendingOperation>();
             while (cursor.moveToNext()) out.add(operationFromCursor(cursor));
@@ -135,8 +146,26 @@ public class TaskRepository {
         }
     }
 
+    public PendingOperation getPendingOperation(String id) {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        Cursor cursor = db.query("pending_operations", null, "id=?", new String[]{id}, null, null, null);
+        try {
+            return cursor.moveToFirst() ? operationFromCursor(cursor) : null;
+        } finally {
+            cursor.close();
+        }
+    }
+
     public void removePendingOperation(String id) {
         helper.getWritableDatabase().delete("pending_operations", "id=?", new String[]{id});
+    }
+
+    /** Remove ops that already reached/exceeded maxRetry. Returns how many were dropped. */
+    public int dropPendingOverRetryLimit(int maxRetry) {
+        return helper.getWritableDatabase().delete(
+                "pending_operations",
+                "retry_count >= ?",
+                new String[]{String.valueOf(maxRetry)});
     }
 
     public void recordOperationError(String id, String error) {

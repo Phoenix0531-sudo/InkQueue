@@ -7,7 +7,9 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "ctl": "node ../scripts/server-ctl.js",
+    "seed": "node ../scripts/seed-sample-tasks.js"
   },
   "engines": {
     "node": ">=18"

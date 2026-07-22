@@ -7,12 +7,22 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
 
+/**
+ * All calendar math for InkQueue is fixed to Asia/Shanghai so Kindle system timezone
+ * cannot shift "today" / weekend / next-week grouping.
+ */
 public final class DateUtils {
     private static final String DATE_PATTERN = "yyyy-MM-dd";
+    /** Product timezone: Beijing (UTC+8). */
+    public static final TimeZone TZ = TimeZone.getTimeZone("Asia/Shanghai");
     private DateUtils() {}
 
+    public static Calendar calendarNow() {
+        return Calendar.getInstance(TZ);
+    }
+
     public static String today() {
-        return formatDate(Calendar.getInstance());
+        return formatDate(calendarNow());
     }
 
     public static String tomorrow(String today) {
@@ -88,9 +98,10 @@ public final class DateUtils {
     public static Calendar parseDate(String date) {
         try {
             SimpleDateFormat format = new SimpleDateFormat(DATE_PATTERN, Locale.US);
+            format.setTimeZone(TZ);
             format.setLenient(false);
             Date parsed = format.parse(date);
-            Calendar calendar = Calendar.getInstance();
+            Calendar calendar = Calendar.getInstance(TZ);
             calendar.setTime(parsed);
             clearTime(calendar);
             return calendar;
@@ -111,19 +122,16 @@ public final class DateUtils {
 
     public static String formatDate(Calendar calendar) {
         SimpleDateFormat format = new SimpleDateFormat(DATE_PATTERN, Locale.US);
+        format.setTimeZone(TZ);
         return format.format(calendar.getTime());
     }
 
     public static String isoNow() {
-        Calendar calendar = Calendar.getInstance();
+        Calendar calendar = calendarNow();
         SimpleDateFormat base = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
-        base.setTimeZone(calendar.getTimeZone());
-        int offsetMs = calendar.getTimeZone().getOffset(calendar.getTimeInMillis());
-        char sign = offsetMs >= 0 ? '+' : '-';
-        int totalMinutes = Math.abs(offsetMs / 60000);
-        int hours = totalMinutes / 60;
-        int minutes = totalMinutes % 60;
-        return base.format(calendar.getTime()) + String.format(Locale.US, "%c%02d:%02d", sign, hours, minutes);
+        base.setTimeZone(TZ);
+        // Asia/Shanghai is fixed +08:00 (no DST).
+        return base.format(calendar.getTime()) + "+08:00";
     }
 
     public static String displayDue(TaskLike task, String today) {
