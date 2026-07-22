@@ -1,77 +1,53 @@
 # InkQueue
 
-**面向墨水屏设备的 CPA 用量与任务队列伴侣**
+**墨水屏 CPA 用量 + Agent 任务队列伴侣（原生 Android）**
 
 [English](README.md) | [中文](README.zh-CN.md)
 
 ![CI](https://github.com/Phoenix0531-sudo/InkQueue/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 
-面向墨水屏设备的 CPA 用量与任务队列伴侣。
+InkQueue 是面向旧安卓墨水屏（Kindle PW3 / KOSP 4.4.2）的 **Agent 同步任务队列** 与 CPA 用量伴侣。桌面显示名：**任务**。
 
-> 作者：[Phoenix0531-sudo](https://github.com/Phoenix0531-sudo) · 欢迎学习、二次开发与**商业使用**，请保留本仓库署名与许可证声明。
+人主要通过 Agent 创建/整理任务；设备只负责任务列表（今日/本周/以后）、详情、完成、推迟与同步。v0.1 **仅原生 Android**，不用 Flutter / RN / WebView。
 
-## 技术栈
+## 为什么做这个
 
-Python/服务 · Android
+512MB 级墨水屏需要极小原生壳。Agent 编排与 CPA 记账放在 Node 服务端；客户端保持简单快速。
 
-## 功能特性
+## 功能
 
-- 任务队列与用量展示
-- 与 CPA / 代理配套
-- Android 端友好
+- 原生 Android（`android/`），`minSdkVersion 19`  
+- `server/` Node 队列与用量 API  
+- 面向 Agent 写入的任务模型  
+- 本地拉起脚本  
 
-## 快速开始
+## 安装 / 运行
 
 ```bash
 git clone https://github.com/Phoenix0531-sudo/InkQueue.git
-cd InkQueue
+cd InkQueue/server
+npm install
+npm start
 ```
 
-```bash
-cd server
-# 按 server 目录启动 API / 队列服务
-```
+端口与 token 见 `server/README.md`、`android/`。
 
-更完整的英文说明见 [README.md](README.md)。
-
-## 仓库结构（摘要）
+## 目录结构
 
 ```
-InkQueue/
-├─ .github/
-├─ android/
-├─ docs/
-├─ scripts/
-├─ server/
-├─ tasks/
-├─ tests/
-├─ LICENSE
-├─ README.md
-├─ README.zh-CN.md
+android/
+server/
+scripts/
+tasks/
+tests/
 ```
 
-## 测试
+## 明确不做
 
-```bash
-pip install pytest
-pytest -q
-```
-
-仓库内 `tests/` 至少包含 smoke 测试；有完整测试套件时以 CI 为准。
-
-## CI
-
-GitHub Actions（`push` / `pull_request`）会：
-
-- 安装依赖（requirements / pyproject）
-- 运行 `pytest`（**硬失败**）
-- 尽力做语法/结构检查
+- 非 Todoist 类通用云 GTD  
+- 非跨端 Flutter 应用  
 
 ## 许可证
 
-[MIT](LICENSE) — 可自由使用、修改、分发与**商用**，需保留版权与许可声明（提及本仓库 / 作者即可）。
-
-## 关于
-
-维护者：[Phoenix0531-sudo](https://github.com/Phoenix0531-sudo)
+MIT。可在署名前提下商用。见 [LICENSE](LICENSE)。
