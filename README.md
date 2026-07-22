@@ -1,63 +1,51 @@
 # InkQueue
 
-**CPA usage + agent task queue companion for e-ink (native Android)**
+**Ink / queue oriented service stack — Node server + Android client experiments.**
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-![CI](https://github.com/Phoenix0531-sudo/InkQueue/actions/workflows/ci.yml/badge.svg)
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+[![CI](https://github.com/Phoenix0531-sudo/InkQueue/actions/workflows/ci.yml/badge.svg)](https://github.com/Phoenix0531-sudo/InkQueue/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
-InkQueue is an **agent-synced task queue** and CPA usage companion for old e-ink Androids (Kindle PW3 / KOSP 4.4.2). Desktop label: **任务**.
+Ink / queue oriented service stack — Node server + Android client experiments.
 
-Humans talk to an agent to create/edit tasks; the device only lists today / week / later, opens detail, completes, snoozes, and syncs. Native Android only — **no** Flutter / RN / WebView in v0.1.
+Local-first tooling for agent / device workflows.
 
-## Why this exists
-
-512MB-class e-ink devices need a tiny native shell. Agent orchestration and CPA accounting stay on the Node server; the client stays dumb and fast.
 
 ## Features
 
-- Native Android client (`android/`), `minSdkVersion 19`
-- Node server under `server/` for queue + usage APIs
-- Task model oriented around agent-written payloads
-- Scripts for local bring-up
+- 🖥️ `server/` Node service
+- 📱 `android/` client experiments
+- 🧪 npm test CI for server path
+- 🔧 scripts/ + tasks for ops helpers
 
-## Install / run
+## Get started
+
+### Install
 
 ```bash
 git clone https://github.com/Phoenix0531-sudo/InkQueue.git
 cd InkQueue/server
 npm install
-npm start
-# build/install android/ with Android Studio or gradle
+npm test
 ```
 
-See `server/README.md` and `android/` for ports and tokens.
+### Usage
 
-## Tests
-
-```bash
-# server unit tests when present
-cd server && npm test
-# repo-level pytest if Python helpers exist
-pytest tests/ || true
-```
+See `server/` README / scripts for start commands. Keep tokens out of git.
 
 ## Project layout
 
 ```
-android/
-server/
-scripts/
-tasks/
-tests/
+server/  android/  scripts/  tasks/
+tests/  docs/
 ```
 
-## What this is not
+## Notes
 
-- Not a general GTD cloud like Todoist
-- Not a cross-platform Flutter app
+Internal tooling portfolio piece — environment-specific ports may vary.
 
 ## License
 
-MIT. Free for commercial use with attribution. See [LICENSE](LICENSE).
+MIT. Free for commercial use with attribution where applicable. See [LICENSE](LICENSE).
