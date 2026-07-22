@@ -14,59 +14,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  python-tests:
-    name: Python tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    env:
-      QT_QPA_PLATFORM: offscreen
-      MPLBACKEND: Agg
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: ${{ hashFiles('**/requirements*.txt', '**/pyproject.toml', '**/uv.lock') != '' && 'pip' || '' }}
-          cache-dependency-path: |
-            **/requirements*.txt
-            **/pyproject.toml
-            **/uv.lock
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          while IFS= read -r f; do pip install -r "$f" || true; done < <(find . -maxdepth 3 -name 'requirements*.txt' -not -path './.venv/*' | head -8)
-          if [ -f pyproject.toml ]; then pip install -e ".[dev]" || pip install -e . || true; fi
-          pip install pytest
-      - name: Required files
-        run: |
-          test -f README.md
-          test -f LICENSE || test -f LICENSE.md
-      - name: Pytest (tests/ only, hard)
-        run: |
-          set -e
-          if [ -d tests ]; then python -m pytest -q tests
-          elif [ -d Test ]; then python -m pytest -q Test
-          else echo "No tests/ — structure OK"; fi
-
-  go-build:
-    name: Go build (if present)
+  server-test:
+    name: Node server tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: server
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-node@v4
         with:
-          go-version: "1.22"
-      - name: Build modules
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install & test
         run: |
-          mapfile -t mods < <(find . -name go.mod -not -path './vendor/*' -not -path './Ref/*' | head -10)
-          if [ ${#mods[@]} -eq 0 ]; then
-            echo "No go.mod"
-          else
-            for m in "${mods[@]}"; do
-              dir=$(dirname "$m")
-              (cd "$dir" && go build ./...)
-            done
-          fi
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm test
+
+  structure:
+    name: Structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          test -f README.md
+          test -f LICENSE || test -f LICENSE.md
+          test -f server/package.json
