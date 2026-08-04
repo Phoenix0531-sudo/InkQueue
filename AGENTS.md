@@ -30,7 +30,7 @@ node agent/inkq.js events --limit 20
 
 ## 明确不做
 
-- **不要**为了 InkQueue 专门安装 skill（`agent/adapters/` 只是可选参考，默认不用）
+- **不要**为了 InkQueue 专门安装 skill / 默认 MCP（`agent/adapters/` 可选参考；`mcp-inkqueue` 仅宿主只认 MCP 时用，仍走 `lib/client.js`）
 - **不要**扫描本机其它产品的全量会话来自动抽任务
 - **不要**手写一长串 curl 当主路径（UTF-8/鉴权易翻车）；统一走 `inkq`
 - 旧文 `docs/agent-prompt.md` 已废弃，以本文件 + `agent/` 为准

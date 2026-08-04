@@ -33,11 +33,11 @@ InkQueue/
 | 路径 | 作用 |
 |------|------|
 | `inkq.js` | **主入口** CLI：health / context / list / add / patch / events / get |
-| `lib/client.js` | 共享 HTTP + 配置解析（CLI / 未来 MCP 共用，禁止第二套协议） |
+| `lib/client.js` | 共享 HTTP + 配置解析（CLI / 可选 MCP 共用，禁止第二套协议） |
 | `interface.md` | **何时必须写成任务** 的硬契约 |
 | `config.example.json` | 配置样例 → 可复制为 `config.json` 或 `~/.inkqueue/config.json` |
 | `test-inkq-smoke.js` | 活 server 冒烟 |
-| `adapters/` | **可选、默认不用**。某家产品想塞说明书时参考；不装也能用 |
+| `adapters/` | **可选、默认不用**。skill 抄写参考 + 可选 `mcp-inkqueue` 薄外壳 |
 
 ## 快速用
 

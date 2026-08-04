@@ -47,7 +47,7 @@ InkQueue/
   agent/                 # Agent interface layer (CLI + contract + thin adapters)
     inkq.js              # universal CLI: health/context/list/add/patch/events
     interface.md         # when an agent MUST write a task
-    adapters/            # optional Hermes / Codex wrappers only
+    adapters/            # optional: skill snippets + mcp-inkqueue (not main path)
   docs/
     architecture.md      # system diagram (android / server / agent)
     product-spec.md      # product requirements
