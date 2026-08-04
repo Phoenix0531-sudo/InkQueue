@@ -66,6 +66,7 @@ assert(patched.code === 0 && patched.json.task.priority === 'high', 'patch prior
 
 const ev = run(['events', '--limit', '5']);
 assert(ev.code === 0 && ev.json && Array.isArray(ev.json.events), 'events shape');
+assert(Array.isArray(ev.json.signals), 'events includes signals');
 
 const bad = run(['get', 'task_does_not_exist_zz']);
 assert(bad.code === 3 && bad.json && bad.json.ok === false, 'get missing → exit 3');

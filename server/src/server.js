@@ -627,6 +627,92 @@ function listEvents(store, sinceIso) {
   return events.filter((e) => e.occurred_at > sinceIso);
 }
 
+/**
+ * Derive agent-readable signals from raw device events.
+ * Pure function: does not mutate store. Backward-compatible add-on for GET /v1/events.
+ *
+ * kinds:
+ *   task_completed     — complete op
+ *   postponed          — postpone op (with target / due shift)
+ *   chronic_postpone   — same task postponed >=3 times in last 7d of the window
+ */
+function normalizePostponeTarget(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const t = payload.postpone_target;
+  if (t === 'tomorrow' || t === 'weekend' || t === 'next_week' || t === 'today') return t;
+  return t ? String(t) : null;
+}
+
+function daysBetweenYmd(a, b) {
+  if (!a || !b) return null;
+  const da = Date.parse(a.slice(0, 10) + 'T00:00:00Z');
+  const db = Date.parse(b.slice(0, 10) + 'T00:00:00Z');
+  if (Number.isNaN(da) || Number.isNaN(db)) return null;
+  return Math.round((db - da) / 86400000);
+}
+
+function deriveSignals(events, opts) {
+  opts = opts || {};
+  const window = Array.isArray(events) ? events : [];
+  const chronicThreshold = opts.chronicThreshold || 3;
+  // Running streak per task within the returned window (chronological).
+  const running = Object.create(null);
+  const signals = [];
+  const chronicEmitted = Object.create(null);
+
+  for (const e of window) {
+    if (!e || !e.type) continue;
+    if (e.type === 'complete') {
+      signals.push({
+        kind: 'task_completed',
+        event_id: e.event_id || null,
+        task_id: e.task_id || null,
+        title: e.task_title || null,
+        at: e.occurred_at || null,
+        advice: '可提后续；勿重复 add 同意图'
+      });
+      continue;
+    }
+    if (e.type === 'postpone') {
+      const payload = e.payload || {};
+      const target = normalizePostponeTarget(payload);
+      const toDue = payload.due_date || null;
+      const fromDue = payload.from_due_date || payload.previous_due_date || null;
+      const tid = e.task_id || null;
+      const streak = tid ? (running[tid] = (running[tid] || 0) + 1) : 1;
+      signals.push({
+        kind: 'postponed',
+        event_id: e.event_id || null,
+        task_id: tid,
+        title: e.task_title || null,
+        at: e.occurred_at || null,
+        target,
+        from_due: fromDue,
+        to_due: toDue,
+        streak,
+        advice:
+          target === 'tomorrow'
+            ? '今日可能过载；少加今天'
+            : target === 'weekend' || target === 'next_week'
+              ? '降低工作日权重，或拆分'
+              : '已推迟；核对 due 是否合理'
+      });
+      if (tid && streak >= chronicThreshold && !chronicEmitted[tid]) {
+        chronicEmitted[tid] = true;
+        signals.push({
+          kind: 'chronic_postpone',
+          task_id: tid,
+          title: e.task_title || null,
+          postpone_count_window: streak,
+          last_at: e.occurred_at || null,
+          advice: '拆分/降级/问是否取消，禁止只改 due'
+        });
+      }
+    }
+  }
+  return signals;
+}
+
 // Returns YYYY-MM-DD of this week's Sunday (Beijing week: Mon..Sun)
 function endOfWeek(todayIso) {
   const d = new Date(`${todayIso}T00:00:00Z`);
@@ -780,7 +866,8 @@ async function handleRequest(req, res) {
       events = events.slice(events.length - limitParam);
     }
     const latest = events.length ? events[events.length - 1].occurred_at : null;
-    sendJson(res, 200, { server_time: nowIso(), events, latest_event_at: latest }); return;
+    const signals = deriveSignals(events);
+    sendJson(res, 200, { server_time: nowIso(), events, signals, latest_event_at: latest }); return;
   }
 
   // Agent scheduling context: helps an Agent decide how many tasks / what cadence to push.
@@ -1013,5 +1100,7 @@ module.exports = {
   nowIso,
   fetchUsage,
   validateStartupConfig,
-  cliproxy
+  cliproxy,
+  listEvents,
+  deriveSignals
 };

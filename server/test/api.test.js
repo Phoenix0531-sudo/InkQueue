@@ -573,3 +573,80 @@ test('P8 outbound agent webhook fires on complete operation when configured', as
     try { fs.unlinkSync(process.env.INKQUEUE_CONFIG_FILE); } catch (e) {}
   }
 });
+
+
+test('GET /v1/events includes backward-compatible signals array', async () => {
+  fs.writeFileSync(process.env.INKQUEUE_DATA_FILE, JSON.stringify({ tasks: [] }, null, 2));
+  const server = start(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const tokenHeader = { 'X-InkQueue-Token': 'dev-token' };
+  try {
+    const ctx0 = await (await request(baseUrl, '/v1/agent/context', { headers: tokenHeader })).json();
+    const today = ctx0.today_date;
+    const created = await request(baseUrl, '/v1/tasks', {
+      method: 'POST', headers: tokenHeader,
+      json: { title: 'signals probe', due_date: today }
+    });
+    const task = (await created.json()).task;
+
+    await request(baseUrl, '/v1/tasks/operations', {
+      method: 'POST', headers: tokenHeader,
+      json: {
+        device_id: 'kindle-pw3',
+        operations: [
+          {
+            id: 'op_sig_complete',
+            type: 'complete',
+            task_id: task.id,
+            created_at: '2026-08-04T09:00:00+08:00',
+            payload: {}
+          }
+        ]
+      }
+    });
+
+    const evRes = await request(baseUrl, '/v1/events', { headers: tokenHeader });
+    assert.equal(evRes.status, 200);
+    const body = await evRes.json();
+    assert.ok(Array.isArray(body.events));
+    assert.ok(Array.isArray(body.signals), 'signals must exist for agents');
+    assert.equal(body.events.length, 1);
+    assert.ok(body.signals.some((s) => s.kind === 'task_completed' && s.task_id === task.id));
+    const completed = body.signals.find((s) => s.kind === 'task_completed');
+    assert.ok(completed.advice && completed.advice.length > 0);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('deriveSignals flags chronic_postpone after 3 postpones on same task', async () => {
+  const { deriveSignals } = require('../src/server');
+  const base = [
+    {
+      event_id: 'op1', type: 'postpone', task_id: 't1', task_title: '慢性推迟',
+      occurred_at: '2026-08-01T10:00:00+08:00',
+      payload: { due_date: '2026-08-02', postpone_target: 'tomorrow' }
+    },
+    {
+      event_id: 'op2', type: 'postpone', task_id: 't1', task_title: '慢性推迟',
+      occurred_at: '2026-08-02T10:00:00+08:00',
+      payload: { due_date: '2026-08-03', postpone_target: 'tomorrow' }
+    },
+    {
+      event_id: 'op3', type: 'postpone', task_id: 't1', task_title: '慢性推迟',
+      occurred_at: '2026-08-03T10:00:00+08:00',
+      payload: { due_date: '2026-08-04', postpone_target: 'weekend' }
+    }
+  ];
+  const signals = deriveSignals(base);
+  const postponed = signals.filter((s) => s.kind === 'postponed');
+  assert.equal(postponed.length, 3);
+  assert.equal(postponed[2].streak, 3);
+  assert.equal(postponed[2].target, 'weekend');
+  const chronic = signals.filter((s) => s.kind === 'chronic_postpone');
+  assert.equal(chronic.length, 1);
+  assert.equal(chronic[0].task_id, 't1');
+  assert.equal(chronic[0].postpone_count_window, 3);
+  assert.match(chronic[0].advice, /拆分|降级|取消/);
+});

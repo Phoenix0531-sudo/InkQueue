@@ -22,7 +22,7 @@ InkQueue/
 你 / 任意 Agent
         │  直接 terminal 调 inkq（推荐）
         ▼
-   agent/inkq.js
+   agent/inkq.js  ──require──►  agent/lib/client.js
         │  HTTP
         ▼
    server :8787  ──Wi‑Fi──►  Kindle App
@@ -33,6 +33,7 @@ InkQueue/
 | 路径 | 作用 |
 |------|------|
 | `inkq.js` | **主入口** CLI：health / context / list / add / patch / events / get |
+| `lib/client.js` | 共享 HTTP + 配置解析（CLI / 未来 MCP 共用，禁止第二套协议） |
 | `interface.md` | **何时必须写成任务** 的硬契约 |
 | `config.example.json` | 配置样例 → 可复制为 `config.json` 或 `~/.inkqueue/config.json` |
 | `test-inkq-smoke.js` | 活 server 冒烟 |

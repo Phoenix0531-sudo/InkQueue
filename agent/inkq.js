@@ -8,6 +8,8 @@
  * instead of hand-rolling curl. The Kindle app never talks to agents;
  * it only syncs with the server this CLI hits.
  *
+ * HTTP + config live in agent/lib/client.js (shared with future MCP).
+ *
  * Config resolution (first hit wins per field):
  *   1) flags: --base-url / --auth
  *   2) env:   INKQUEUE_BASE_URL / INKQUEUE_AUTH
@@ -18,24 +20,20 @@
  * stderr = short human hints
  */
 
-const fs = require('fs');
 const path = require('path');
-const http = require('http');
-const https = require('https');
-const os = require('os');
+const client = require(path.join(__dirname, 'lib', 'client.js'));
 
-const DEFAULT_BASE = 'http://127.0.0.1:8787';
-const DEFAULT_AUTH = 'dev-token';
-const HEADER_AUTH = 'X-InkQueue-Token';
-const PRODUCT_TZ_OFFSET = '+08:00';
-
-const ROOT = path.resolve(__dirname, '..');
-const LOCAL_CONFIG_CANDIDATES = [
-  process.env.INKQUEUE_CONFIG,
-  path.join(os.homedir(), '.inkqueue', 'config.json'),
-  path.join(__dirname, 'config.json'),
-  path.join(ROOT, 'server', 'data', 'agent-config.json')
-].filter(Boolean);
+const {
+  DEFAULT_BASE,
+  buildConfig,
+  health: apiHealth,
+  context: apiContext,
+  snapshot: apiSnapshot,
+  createTask: apiCreateTask,
+  patchTask: apiPatchTask,
+  events: apiEvents,
+  resolveDue
+} = client;
 
 function usage(code) {
   const text = `inkq — InkQueue agent CLI
@@ -70,26 +68,6 @@ Exit codes: 0 ok, 1 usage/client, 2 server/network, 3 not found
   process.exit(code);
 }
 
-function readJsonFile(p) {
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-function loadFileConfig(explicitPath) {
-  const paths = explicitPath ? [explicitPath] : LOCAL_CONFIG_CANDIDATES;
-  for (const p of paths) {
-    if (!p) continue;
-    const raw = readJsonFile(p);
-    if (raw && typeof raw === 'object') {
-      return { path: p, data: raw };
-    }
-  }
-  return { path: null, data: {} };
-}
-
 function parseArgs(argv) {
   const out = { _: [], flags: {} };
   for (let i = 0; i < argv.length; i++) {
@@ -112,123 +90,6 @@ function parseArgs(argv) {
   return out;
 }
 
-/** Asia/Shanghai wall clock as +08:00 ISO parts (mirrors server). */
-function shanghaiNowParts() {
-  const d = new Date();
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  }).formatToParts(d);
-  const get = (type) => {
-    const p = parts.find((x) => x.type === type);
-    return p ? p.value : '00';
-  };
-  return {
-    date: `${get('year')}-${get('month')}-${get('day')}`,
-    time: `${get('hour')}:${get('minute')}:${get('second')}`
-  };
-}
-
-function addDaysYmd(ymd, days) {
-  const [y, m, d] = ymd.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + days);
-  return dt.toISOString().slice(0, 10);
-}
-
-function resolveDue(raw) {
-  if (raw === undefined || raw === null || raw === '') return undefined;
-  const s = String(raw).trim().toLowerCase();
-  const today = shanghaiNowParts().date;
-  if (s === 'today') return today;
-  if (s === 'tomorrow') return addDaysYmd(today, 1);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  throw new Error(`invalid --due (want today|tomorrow|YYYY-MM-DD): ${raw}`);
-}
-
-function buildConfig(flags) {
-  const file = loadFileConfig(flags.config);
-  const data = file.data || {};
-  const baseUrl = String(
-    flags['base-url'] ||
-      process.env.INKQUEUE_BASE_URL ||
-      data.base_url ||
-      data.baseUrl ||
-      DEFAULT_BASE
-  ).replace(/\/$/, '');
-  const auth = String(
-    flags.auth ||
-      process.env.INKQUEUE_AUTH ||
-      data.auth ||
-      data.token ||
-      DEFAULT_AUTH
-  );
-  return { baseUrl, auth, configPath: file.path };
-}
-
-function request(cfg, method, apiPath, bodyObj) {
-  return new Promise((resolve, reject) => {
-    let url;
-    try {
-      url = new URL(apiPath, cfg.baseUrl.endsWith('/') ? cfg.baseUrl : cfg.baseUrl + '/');
-    } catch (err) {
-      reject(err);
-      return;
-    }
-    const payload = bodyObj === undefined ? null : JSON.stringify(bodyObj);
-    const isHttps = url.protocol === 'https:';
-    const lib = isHttps ? https : http;
-    const headers = {
-      Accept: 'application/json',
-      [HEADER_AUTH]: cfg.auth
-    };
-    if (payload !== null) {
-      headers['Content-Type'] = 'application/json; charset=utf-8';
-      headers['Content-Length'] = Buffer.byteLength(payload);
-    }
-    const req = lib.request(
-      {
-        protocol: url.protocol,
-        hostname: url.hostname,
-        port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname + url.search,
-        method,
-        headers,
-        timeout: 15000
-      },
-      (res) => {
-        const chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          const raw = Buffer.concat(chunks).toString('utf8');
-          let json = null;
-          if (raw) {
-            try {
-              json = JSON.parse(raw);
-            } catch {
-              json = { raw };
-            }
-          }
-          resolve({ status: res.statusCode || 0, json, raw });
-        });
-      }
-    );
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('request timeout'));
-    });
-    if (payload !== null) req.write(payload);
-    req.end();
-  });
-}
-
 function emit(okPayload, hint) {
   if (hint) process.stderr.write(hint.endsWith('\n') ? hint : hint + '\n');
   process.stdout.write(JSON.stringify(okPayload, null, 2) + '\n');
@@ -242,7 +103,7 @@ function fail(exitCode, error, detail) {
 
 async function cmdHealth(cfg) {
   try {
-    const res = await request(cfg, 'GET', '/v1/health');
+    const res = await apiHealth(cfg);
     if (res.status !== 200) {
       fail(2, 'health_failed', { status: res.status, body: res.json });
     }
@@ -260,7 +121,7 @@ async function cmdHealth(cfg) {
 }
 
 async function cmdContext(cfg) {
-  const res = await request(cfg, 'GET', '/v1/agent/context');
+  const res = await apiContext(cfg);
   if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
   if (res.status !== 200) fail(2, 'context_failed', { status: res.status, body: res.json });
   const note = res.json && res.json.suggestion && res.json.suggestion.note;
@@ -281,7 +142,7 @@ function filterTasks(tasks, flags) {
 }
 
 async function cmdList(cfg, flags) {
-  const res = await request(cfg, 'GET', '/v1/tasks/snapshot');
+  const res = await apiSnapshot(cfg);
   if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
   if (res.status !== 200) fail(2, 'list_failed', { status: res.status, body: res.json });
   const all = (res.json && res.json.tasks) || [];
@@ -299,7 +160,7 @@ async function cmdList(cfg, flags) {
 }
 
 async function cmdGet(cfg, id) {
-  const res = await request(cfg, 'GET', '/v1/tasks/snapshot');
+  const res = await apiSnapshot(cfg);
   if (res.status !== 200) fail(2, 'snapshot_failed', { status: res.status, body: res.json });
   const tasks = (res.json && res.json.tasks) || [];
   const task = tasks.find((t) => t.id === id);
@@ -321,7 +182,7 @@ async function cmdAdd(cfg, flags) {
   if (flags.priority !== undefined) body.priority = flags.priority;
   if (flags.status !== undefined) body.status = flags.status;
 
-  const res = await request(cfg, 'POST', '/v1/tasks', body);
+  const res = await apiCreateTask(cfg, body);
   if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
   if (res.status !== 201 && res.status !== 200) {
     fail(2, 'add_failed', { status: res.status, body: res.json });
@@ -347,7 +208,7 @@ async function cmdPatch(cfg, id, flags) {
   if (Object.keys(body).length === 0) {
     fail(1, 'nothing_to_patch', { hint: 'pass --title/--note/--due/--time/--priority/--status' });
   }
-  const res = await request(cfg, 'PATCH', `/v1/tasks/${encodeURIComponent(id)}`, body);
+  const res = await apiPatchTask(cfg, id, body);
   if (res.status === 404) fail(3, 'not_found', { id, body: res.json });
   if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
   if (res.status !== 200) fail(2, 'patch_failed', { status: res.status, body: res.json });
@@ -355,23 +216,26 @@ async function cmdPatch(cfg, id, flags) {
 }
 
 async function cmdEvents(cfg, flags) {
-  const q = new URLSearchParams();
-  if (flags.since) q.set('since', flags.since);
-  if (flags.limit) q.set('limit', String(flags.limit));
-  const qs = q.toString();
-  const res = await request(cfg, 'GET', '/v1/events' + (qs ? `?${qs}` : ''));
+  const res = await apiEvents(cfg, { since: flags.since, limit: flags.limit });
   if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
   if (res.status !== 200) fail(2, 'events_failed', { status: res.status, body: res.json });
   const events = (res.json && res.json.events) || [];
+  const signals = (res.json && res.json.signals) || [];
+  const hintParts = [`${events.length} event(s)`];
+  if (signals.length) hintParts.push(`${signals.length} signal(s)`);
+  const chronic = signals.filter((s) => s.kind === 'chronic_postpone');
+  if (chronic.length) hintParts.push(`chronic_postpone=${chronic.length}`);
   emit(
     {
       ok: true,
       server_time: res.json.server_time,
       latest_event_at: res.json.latest_event_at,
       count: events.length,
-      events
+      signal_count: signals.length,
+      events,
+      signals
     },
-    `${events.length} event(s)`
+    hintParts.join(', ')
   );
 }
 

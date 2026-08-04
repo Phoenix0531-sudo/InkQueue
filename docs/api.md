@@ -216,6 +216,16 @@ curl "http://localhost:8787/v1/events?since=2026-08-02T09:05:30+08:00&limit=50" 
       }
     }
   ],
+  "signals": [
+    {
+      "kind": "task_completed",
+      "event_id": "op_1785632760234_5c22bf",
+      "task_id": "task_mrup8na0_d8f6813f",
+      "title": "修改新文章",
+      "at": "2026-08-02T09:06:03+08:00",
+      "advice": "可提后续；勿重复 add 同意图"
+    }
+  ],
   "latest_event_at": "2026-08-02T09:06:03+08:00"
 }
 ```
@@ -225,6 +235,15 @@ curl "http://localhost:8787/v1/events?since=2026-08-02T09:05:30+08:00&limit=50" 
 - `limit=N`: 只返回最近 N 个事件（保留尾部）。
 
 `type` 取值：`complete`、`postpone`。`event_id` 等同于操作 id，是幂等键。Agent 可以安全重放。
+
+响应额外字段（**向后兼容**）：
+
+- `signals`: 从当前返回的 `events` 窗口派生的 Agent 可读语义，不替代 raw events。
+  - `task_completed` — 完成；可提后续，勿重复 add 同意图
+  - `postponed` — 推迟；含 `target`（tomorrow/weekend/next_week/…）、`streak`、`to_due`
+  - `chronic_postpone` — 同一 task 在本窗口内 postpone ≥ 3；应拆分/降级/问是否取消，禁止只改 due
+
+`signals` 与 `events` 同源、同 since/limit 窗口。`since` 过滤后 chronic 计数只基于返回窗口（不是全历史）。
 
 ### GET /v1/agent/context
 

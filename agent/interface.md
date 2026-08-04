@@ -71,6 +71,8 @@ node agent/inkq.js events --limit 30
 node agent/inkq.js context
 ```
 
+`events` 响应同时含 raw `events` 与派生 `signals`（`task_completed` / `postponed` / `chronic_postpone`）。优先看 `signals` 再决定是否 add/改 due；`chronic_postpone` 出现时禁止无脑再 postpone。
+
 ## 对用户怎么说话
 
 写入成功后用一句人话即可，例如：
