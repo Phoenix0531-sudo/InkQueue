@@ -6,6 +6,9 @@
  * Start server first: node scripts/server-ctl.js start
  *
  *   node agent/test-inkq-smoke.js
+ *
+ * Creates a temporary task then marks it done so the Kindle queue
+ * is not polluted by smoke leftovers.
  */
 
 const { spawnSync } = require('child_process');
@@ -70,5 +73,9 @@ assert(Array.isArray(ev.json.signals), 'events includes signals');
 
 const bad = run(['get', 'task_does_not_exist_zz']);
 assert(bad.code === 3 && bad.json && bad.json.ok === false, 'get missing → exit 3');
+
+// Cleanup: do not leave smoke tasks open on Kindle.
+const done = run(['patch', id, '--status', 'done']);
+assert(done.code === 0 && done.json && done.json.task && done.json.task.status === 'done', 'smoke task cleaned (done)');
 
 console.log('\nAll inkq smoke checks passed.');

@@ -12,7 +12,7 @@
 
 ## 主路径（不需要 skill）
 
-**不装 Hermes skill、不装 MCP、不绑任何一家 Agent。**  
+**不装 Hermes skill、不绑任何一家 Agent。** 主路径仍是 terminal 调 `inkq`；MCP 可选（`mcp-inkqueue`），不是默认依赖。  
 会跑下面命令即可：
 
 ```bash
