@@ -19,7 +19,14 @@ server/data/server.log
 server/data/tmp/
 server/data/preferred-port.txt
 server/data/_usage_last.json
+server/data/agent-config.json
+agent/config.json
 __pycache__/
 **/__pycache__/
 *.pyc
 .pytest_cache/
+
+# local probe dumps
+docs/screenshots/v7-probe-*.png
+docs/screenshots/audit/
+.probe_tmp/

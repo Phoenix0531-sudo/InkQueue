@@ -1,88 +1,146 @@
 package dev.inkqueue;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
-import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.AsyncTask;
 import android.os.Bundle;
-import android.view.Gravity;
-import android.view.View;
-import android.view.ViewGroup;
+import android.os.PowerManager;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.AdapterView;
-import android.widget.LinearLayout;
-import android.widget.ListView;
-import android.widget.TextView;
 import android.widget.Toast;
 import dev.inkqueue.data.Task;
 import dev.inkqueue.data.TaskRepository;
-import dev.inkqueue.data.UsageProvider;
+import dev.inkqueue.data.OperationQueue;
 import dev.inkqueue.sync.SyncResult;
 import dev.inkqueue.sync.SyncService;
-import dev.inkqueue.sync.ServerDiscovery;
+import dev.inkqueue.ui.InkMainView;
 import dev.inkqueue.ui.SectionedTaskList;
-import dev.inkqueue.ui.TaskAdapter;
 import dev.inkqueue.util.DateUtils;
-import java.util.ArrayList;
 import java.util.List;
 
-public class MainActivity extends Activity {
+/**
+ * Main task-list screen for InkQueue.
+ *
+ * v0.8.2:
+ *  - shared TaskRepository (no per-Activity SQLite helper)
+ *  - sync phases visible in masthead ("正在上传 N 条…" / "正在拉取…")
+ *  - single-flight aware (ignore busy SyncResult without clobbering status)
+ *  - offline still refreshes pending count
+ */
+public class MainActivity extends Activity implements InkMainView.Listener {
     private static final int REQUEST_DETAIL = 10;
     private static final int REQUEST_SETTINGS = 11;
+    private static final String PREFS = "inkqueue";
+    private static final String KEY_ALWAYS_ON = "always_on";
+
     private TaskRepository repository;
-    private TaskAdapter adapter;
-    private TextView statusText;
+    private InkMainView mainView;
+    private int currentPage = SectionedTaskList.PAGE_TODAY;
+    private boolean shouldAutoNavToOverdue = true;
     private String pendingMessage;
-    private ServerDiscovery discovery;
-    private LinearLayout usageView;
     private AsyncTask<?, ?, ?> activeSyncTask;
-    private AsyncTask<?, ?, ?> activeUsageTask;
+    private SectionedTaskList lastGrouped;
+    private PowerManager.WakeLock wakeLock;
+    private boolean syncUiActive;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        repository = new TaskRepository(this);
-        setContentView(buildLayout());
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                             WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        repository = TaskRepository.getInstance(this);
+
+        mainView = new InkMainView(this);
+        mainView.setListener(this);
+        setContentView(mainView);
+
+        applyAlwaysOnMode();
         renderLocal();
         syncInBackground(false);
+    }
+
+    private void applyAlwaysOnMode() {
+        boolean alwaysOn = getSharedPreferences(PREFS, 0).getBoolean(KEY_ALWAYS_ON, true);
+        if (alwaysOn) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            try {
+                WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.screenBrightness = 0.25f;
+                getWindow().setAttributes(lp);
+            } catch (Throwable t) { android.util.Log.w("InkQueue", "dim failed: " + t); }
+            try {
+                PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                if (pm != null) {
+                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "InkQueue:desk");
+                    wakeLock.setReferenceCounted(false);
+                    wakeLock.acquire(60 * 60 * 1000L);
+                }
+            } catch (Throwable t) { android.util.Log.w("InkQueue", "wakeLock failed: " + t); }
+            android.util.Log.i("InkQueue", "always-on mode on");
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            try {
+                WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+                getWindow().setAttributes(lp);
+            } catch (Throwable t) {}
+            if (wakeLock != null && wakeLock.isHeld()) { wakeLock.release(); wakeLock = null; }
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        applyAlwaysOnMode();
         if (repository != null) renderLocal();
+    }
+
+    @Override
+    protected void onPause() {
+        if (wakeLock != null && wakeLock.isHeld()) { wakeLock.release(); }
+        super.onPause();
     }
 
     @Override
     protected void onDestroy() {
         cancelAsyncWork();
-        if (discovery != null) {
-            discovery.stop();
-            discovery = null;
-        }
+        if (wakeLock != null && wakeLock.isHeld()) { wakeLock.release(); }
         super.onDestroy();
     }
+
+    @Override public void onTabSelected(int page) {
+        currentPage = page;
+        renderLocal();
+    }
+
+    @Override public void onTaskClicked(String taskId) { openTask(taskId); }
+
+    @Override public void onTaskLongPressed(String taskId) {
+        Task task = repository.getTaskById(taskId);
+        if (task != null) showPostponeDialog(task);
+    }
+
+    @Override public void onTaskCompleteClicked(String taskId) { completeTaskFromList(taskId); }
+
+    @Override public void onBulkAction(int actionCode) { bulkPostponeOverdue(actionCode); }
+
+    @Override public void onSyncClicked() { syncInBackground(true); }
+
+    @Override public void onSettingsClicked() { openSettings(); }
 
     private void cancelAsyncWork() {
         if (activeSyncTask != null) {
             activeSyncTask.cancel(true);
             activeSyncTask = null;
         }
-        if (activeUsageTask != null) {
-            activeUsageTask.cancel(true);
-            activeUsageTask = null;
-        }
     }
 
-    private boolean isActivityAlive() {
-        return !isFinishing();
-    }
+    private boolean isActivityAlive() { return !isFinishing(); }
 
     private boolean isOnline() {
         ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
@@ -91,424 +149,175 @@ public class MainActivity extends Activity {
         return info != null && info.isConnected();
     }
 
-    private View buildLayout() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.BLACK);
-        root.setPadding(dp(16), dp(14), dp(16), dp(8));
-
-        TextView title = new TextView(this);
-        title.setText("TODOLIST");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(28);
-        title.setOnLongClickListener(new View.OnLongClickListener() {
-            @Override public boolean onLongClick(View v) { openSettings(); return true; }
-        });
-        root.addView(title);
-
-        View sep = new View(this);
-        sep.setBackgroundColor(0xff555555);
-        root.addView(sep, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-        addSpace(root, 4);
-
-        statusText = new TextView(this);
-        statusText.setTextColor(0xffcccccc);
-        statusText.setTextSize(10);
-        root.addView(statusText);
-        addSpace(root, 4);
-
-        // Usage dashboard
-        usageView = new LinearLayout(this);
-        usageView.setOrientation(LinearLayout.VERTICAL);
-        usageView.setBackgroundColor(Color.BLACK);
-        root.addView(usageView);
-
-        adapter = new TaskAdapter(this);
-        ListView list = new ListView(this);
-        list.setAdapter(adapter);
-        list.setCacheColorHint(Color.TRANSPARENT);
-        list.setDivider(new ColorDrawable(0));
-        list.setDividerHeight(0);
-        list.setSelector(new ColorDrawable(0x44ffffff));
-        list.setBackgroundColor(Color.BLACK);
-        list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                SectionedTaskList.Row row = adapter.getItem(position);
-                if (row.task != null) openTask(row.task.id);
-            }
-        });
-        root.addView(list, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
-
-        View footerLine = new View(this);
-        footerLine.setBackgroundColor(0xff555555);
-        root.addView(footerLine, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-        LinearLayout footer = new LinearLayout(this);
-        footer.setOrientation(LinearLayout.HORIZONTAL);
-        footer.setBackgroundColor(Color.BLACK);
-        footer.addView(footerAction("SYNC", new View.OnClickListener() {
-            @Override public void onClick(View v) { syncInBackground(true); }
-        }));
-        View fd = new View(this);
-        fd.setBackgroundColor(0xff555555);
-        footer.addView(fd, new LinearLayout.LayoutParams(dp(1), dp(34)));
-        footer.addView(footerAction("SETTINGS", new View.OnClickListener() {
-            @Override public void onClick(View v) { openSettings(); }
-        }));
-        root.addView(footer);
-        return root;
-    }
-
-    private TextView footerAction(String text, View.OnClickListener listener) {
-        TextView row = new TextView(this);
-        row.setText(text);
-        row.setTextColor(Color.WHITE);
-        row.setTextSize(13);
-        row.setGravity(Gravity.CENTER);
-        row.setLayoutParams(new LinearLayout.LayoutParams(0, dp(44), 1));
-        row.setOnClickListener(listener);
-        return row;
-    }
-
     private void renderLocal() {
         List<Task> tasks = repository.getAllOpenTasks();
         String today = DateUtils.today();
-        adapter.setRows(SectionedTaskList.group(tasks, today).toRows(today));
+        lastGrouped = SectionedTaskList.group(tasks, today);
+
+        if (shouldAutoNavToOverdue && !lastGrouped.overdue.isEmpty()) {
+            currentPage = SectionedTaskList.PAGE_OVERDUE;
+            shouldAutoNavToOverdue = false;
+        }
+
+        java.util.List<SectionedTaskList.Row> pageRows = lastGrouped.pageRows(currentPage, today);
+        mainView.setPage(currentPage, pageRows);
+
+        int pendingN = repository.countPendingOperations();
+        mainView.setPendingCount(pendingN);
+
+        if (syncUiActive) {
+            // Keep the in-flight phase string; do not clobber with last-sync.
+            return;
+        }
+
         if (pendingMessage != null) {
-            statusText.setText(pendingMessage);
+            mainView.setStatusText(pendingMessage);
             pendingMessage = null;
         } else {
-            statusText.setText(DateUtils.displayLastSync(repository.getLastSyncTime()));
-        }
-    }
-
-    private void renderUsage(final List<UsageProvider> providers) {
-        if (!isActivityAlive() || usageView == null) return;
-        usageView.removeAllViews();
-        if (providers == null || providers.isEmpty()) return;
-
-        UsageProvider cpa = null;
-        for (int i = 0; i < providers.size(); i++) {
-            UsageProvider p = providers.get(i);
-            if (p.isPool || "cliproxyapi".equals(p.provider)) {
-                cpa = p;
-                break;
+            String last = DateUtils.displayLastSync(repository.getLastSyncTime());
+            String err = repository.getLastSyncError();
+            if (pendingN > 0) {
+                if (last == null || last.length() == 0) {
+                    last = "未同步";
+                }
+                // residual queue is already shown via setPendingCount; keep last sync text
+            } else if (err != null && err.length() > 0 && (last == null || last.length() == 0)) {
+                last = err;
             }
+            mainView.setStatusText(last);
         }
-        if (cpa == null) return;
-
-        // Card shell
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(10), dp(8), dp(10), dp(8));
-        card.setBackgroundColor(Color.BLACK);
-        // Outer border via nested frames: top/bottom lines only to keep e-ink clean.
-
-        // Header row: title + status badge
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView title = new TextView(this);
-        title.setText("CPA");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(14);
-        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        header.addView(title);
-
-        TextView badge = new TextView(this);
-        boolean ok = cpa.getStatusText() == null && cpa.error == null;
-        badge.setText(ok ? " 正常 " : " 异常 ");
-        badge.setTextColor(ok ? Color.BLACK : Color.WHITE);
-        badge.setBackgroundColor(ok ? Color.WHITE : 0xff888888);
-        badge.setTextSize(11);
-        badge.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        badge.setPadding(dp(6), dp(2), dp(6), dp(2));
-        header.addView(badge);
-        card.addView(header);
-
-        TextView sub = new TextView(this);
-        if (cpa.latencyMs > 0) {
-            sub.setText("延迟 " + formatLatency(cpa.latencyMs) + " · 模型 " + cpa.modelCount);
-        } else {
-            sub.setText("模型 " + cpa.modelCount);
-        }
-        sub.setTextColor(0xffbbbbbb);
-        sub.setTextSize(11);
-        sub.setPadding(0, dp(2), 0, dp(6));
-        card.addView(sub);
-
-        card.addView(thinLine());
-
-        // Big metrics row: accounts / codex / grok
-        LinearLayout metrics = new LinearLayout(this);
-        metrics.setOrientation(LinearLayout.HORIZONTAL);
-        metrics.setPadding(0, dp(6), 0, dp(4));
-        metrics.addView(metricCell("账号", String.valueOf(cpa.totalAccounts), cpa.enough ? "够用" : "偏少"));
-        metrics.addView(vDiv());
-        String codexHint = cpa.codexDead > 0
-                ? ("失效" + cpa.codexDead)
-                : "可用号";
-        metrics.addView(metricCell("Codex", String.valueOf(cpa.codexEnabled), codexHint));
-        metrics.addView(vDiv());
-        metrics.addView(metricCell("Grok", String.valueOf(cpa.xaiEnabled), "可用号"));
-        card.addView(metrics);
-
-        card.addView(thinLine());
-
-        // Detail rows — 累计次数 ≠ 账号数
-        if (cpa.codexDead > 0 || cpa.codexQuotaPercent >= 0) {
-            String codexDetail = "可用 " + cpa.codexEnabled;
-            if (cpa.codexTotal > 0) codexDetail += "/" + cpa.codexTotal;
-            if (cpa.codexDead > 0) codexDetail += " · 失效 " + cpa.codexDead;
-            // Label comes from API limit_window_seconds — do NOT hardcode "5h"
-            if (cpa.codexQuotaPercent >= 0) {
-                String window = (cpa.codexQuotaLabel != null && cpa.codexQuotaLabel.length() > 0)
-                        ? cpa.codexQuotaLabel
-                        : "额度";
-                codexDetail += " · " + window + "已用 " + cpa.codexQuotaPercent + "%";
-            }
-            card.addView(kvRow("Codex", codexDetail));
-        }
-        card.addView(kvRow("调用", "累计成功 " + cpa.success + " 次 · 失败 " + cpa.failed + " 次"
-                + (cpa.unavailable > 0 ? (" · 异常号 " + cpa.unavailable) : "")));
-        if (cpa.disabled > 0 || cpa.tokenExpired > 0) {
-            card.addView(kvRow("账号", "禁用 " + cpa.disabled + " · 过期 " + cpa.tokenExpired));
-        }
-
-        if (cpa.recentCount > 0 || cpa.lastModel != null) {
-            String recent = "近 " + cpa.recentCount + " 次 · 失败 " + cpa.recentFails;
-            if (cpa.recentAvgLatencyMs > 0) recent += " · 均 " + formatLatency(cpa.recentAvgLatencyMs);
-            card.addView(kvRow("最近", recent));
-            if (cpa.lastModel != null) {
-                card.addView(kvRow("模型", cpa.lastModel));
-            }
-        } else if (cpa.getStatusText() != null) {
-            card.addView(kvRow("说明", cpa.getStatusText()));
-        }
-
-        usageView.addView(card);
-
-        View bottomLine = new View(this);
-        bottomLine.setBackgroundColor(0xff555555);
-        usageView.addView(bottomLine, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-        addSpace(usageView, 6);
-    }
-
-    private View thinLine() {
-        View line = new View(this);
-        line.setBackgroundColor(0xff444444);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
-        lp.topMargin = dp(2);
-        lp.bottomMargin = dp(2);
-        line.setLayoutParams(lp);
-        return line;
-    }
-
-    private View vDiv() {
-        View d = new View(this);
-        d.setBackgroundColor(0xff444444);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(1), dp(36));
-        lp.leftMargin = dp(4);
-        lp.rightMargin = dp(4);
-        lp.gravity = Gravity.CENTER_VERTICAL;
-        d.setLayoutParams(lp);
-        return d;
-    }
-
-    private LinearLayout metricCell(String label, String value, String hint) {
-        LinearLayout cell = new LinearLayout(this);
-        cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setGravity(Gravity.CENTER_HORIZONTAL);
-        cell.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        cell.setPadding(dp(2), dp(2), dp(2), dp(2));
-
-        TextView v = new TextView(this);
-        v.setText(value);
-        v.setTextColor(Color.WHITE);
-        v.setTextSize(20);
-        v.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        v.setGravity(Gravity.CENTER);
-        cell.addView(v);
-
-        TextView l = new TextView(this);
-        l.setText(label);
-        l.setTextColor(0xffdddddd);
-        l.setTextSize(11);
-        l.setGravity(Gravity.CENTER);
-        cell.addView(l);
-
-        TextView h = new TextView(this);
-        h.setText(hint);
-        h.setTextColor(0xff999999);
-        h.setTextSize(10);
-        h.setGravity(Gravity.CENTER);
-        cell.addView(h);
-        return cell;
-    }
-
-    private LinearLayout kvRow(String key, String value) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(0, dp(3), 0, dp(3));
-
-        TextView k = new TextView(this);
-        k.setText(key);
-        k.setTextColor(0xffaaaaaa);
-        k.setTextSize(12);
-        k.setLayoutParams(new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.WRAP_CONTENT));
-        row.addView(k);
-
-        TextView v = new TextView(this);
-        v.setText(value);
-        v.setTextColor(Color.WHITE);
-        v.setTextSize(12);
-        v.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        row.addView(v);
-        return row;
-    }
-
-    private String formatLatency(int ms) {
-        if (ms <= 0) return "-";
-        if (ms < 1000) return ms + "毫秒";
-        return (Math.round(ms / 100f) / 10f) + "秒";
-    }
-
-    private View barRow(String label, int percent) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(dp(4), dp(1), dp(4), dp(1));
-        // Label
-        TextView lbl = new TextView(this);
-        lbl.setText(label);
-        lbl.setTextColor(0xffaaaaaa);
-        lbl.setTextSize(9);
-        lbl.setTypeface(android.graphics.Typeface.MONOSPACE);
-        lbl.setLayoutParams(new LinearLayout.LayoutParams(dp(64), ViewGroup.LayoutParams.WRAP_CONTENT));
-        row.addView(lbl);
-        // Bar background (filled)
-        View filled = new View(this);
-        int fillWidth = Math.max(percent * dp(2), dp(1));
-        if (fillWidth > dp(80)) fillWidth = dp(80);
-        filled.setLayoutParams(new LinearLayout.LayoutParams(fillWidth, dp(8)));
-        filled.setBackgroundColor(percent > 70 ? 0xffcc6666 : 0xff888888);
-        row.addView(filled);
-        // Remaining (unfilled)
-        int remainWidth = dp(80) - fillWidth;
-        if (remainWidth > 0) {
-            View empty = new View(this);
-            empty.setLayoutParams(new LinearLayout.LayoutParams(remainWidth, dp(8)));
-            empty.setBackgroundColor(0xff333333);
-            row.addView(empty);
-        }
-        // Percentage text
-        TextView pct = new TextView(this);
-        pct.setText(" " + percent + "%");
-        pct.setTextColor(0xffaaaaaa);
-        pct.setTextSize(9);
-        pct.setTypeface(android.graphics.Typeface.MONOSPACE);
-        row.addView(pct);
-        return row;
     }
 
     private void syncInBackground(final boolean manual) {
+        android.util.Log.i("InkQueueSync", "syncInBackground(manual=" + manual + ")");
         if (!isOnline()) {
+            android.util.Log.w("InkQueueSync", "isOnline=false, skip");
             if (manual) {
-                statusText.setText("offline. showing local data.");
-                Toast.makeText(this, "offline. showing local data.", Toast.LENGTH_SHORT).show();
+                String msg = "离线模式，显示本地内容";
+                mainView.setStatusText(msg);
+                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
             }
-            // auto-sync: skip silently when offline (no WiFi wake / wasted e-ink refresh)
+            renderLocal();
             return;
         }
+        if (SyncService.isSyncInFlight() || activeSyncTask != null) {
+            android.util.Log.i("InkQueueSync", "sync already running — skip new request");
+            if (manual) {
+                mainView.setStatusText("正在同步…");
+                Toast.makeText(this, "正在同步…", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+
         final SyncService svc = new SyncService(this);
-        if (!manual && (svc.getBaseUrl() == null || svc.getBaseUrl().length() == 0)) {
-            statusText.setText("> discovering server...");
-            startDiscovery();
-            return;
+        final int pendingBefore = repository.countPendingOperations();
+        final String phase = pendingBefore > 0
+                ? ("正在上传 " + pendingBefore + " 条…")
+                : "正在拉取…";
+        syncUiActive = true;
+        mainView.setStatusText(phase);
+        if (manual) {
+            // toast only on manual to avoid noise on every open
         }
-        if (manual) statusText.setText("> syncing...");
-        if (activeSyncTask != null) activeSyncTask.cancel(true);
+
         activeSyncTask = new AsyncTask<Void, Void, SyncResult>() {
             @Override protected SyncResult doInBackground(Void... v) {
-                return svc.performSync();
+                android.util.Log.i("InkQueueSync", "doInBackground calling performSync()");
+                SyncResult r = svc.performSync();
+                android.util.Log.i("InkQueueSync", "performSync result: "
+                        + (r == null ? "null" : ("success=" + r.success
+                        + " msg=" + r.userMessage
+                        + " accepted=" + r.opsAccepted
+                        + " remaining=" + r.pendingRemaining)));
+                return r;
             }
             @Override protected void onPostExecute(SyncResult result) {
                 activeSyncTask = null;
+                syncUiActive = false;
                 if (!isActivityAlive() || isCancelled()) return;
-                renderLocal();
-                fetchUsageAsync(svc);
-                if (!result.success && manual && result.userMessage != null
-                        && result.userMessage.contains("no server configured")) {
-                    statusText.setText("> discovering server...");
-                    startDiscovery();
+                if (result != null && result.skippedBusy) {
+                    // Another path finished first; just re-render.
+                    renderLocal();
                     return;
                 }
-                if (result.userMessage != null) {
-                    statusText.setText(result.userMessage);
-                    if (manual) Toast.makeText(MainActivity.this, result.userMessage, Toast.LENGTH_SHORT).show();
+                renderLocal();
+                if (result != null && result.userMessage != null) {
+                    mainView.setStatusText(result.userMessage);
+                    if (manual) {
+                        Toast.makeText(MainActivity.this, result.userMessage, Toast.LENGTH_SHORT).show();
+                    }
                 }
             }
         }.execute();
     }
 
-    private void fetchUsageAsync(final SyncService svc) {
-        if (!isActivityAlive()) return;
-        if (activeUsageTask != null) activeUsageTask.cancel(true);
-        activeUsageTask = new AsyncTask<Void, Void, List<UsageProvider>>() {
-            @Override protected List<UsageProvider> doInBackground(Void... x) {
-                return svc.fetchUsage();
-            }
-            @Override protected void onPostExecute(List<UsageProvider> u) {
-                activeUsageTask = null;
-                if (!isActivityAlive() || isCancelled()) return;
-                renderUsage(u);
-            }
-        }.execute();
+    private void completeTaskFromList(String taskId) {
+        try {
+            Task task = repository.getTaskById(taskId);
+            if (task == null) return;
+            String now = DateUtils.isoNow();
+            new OperationQueue(repository).complete(task, now);
+            renderLocal();
+            Toast.makeText(this, isOnline() ? "已完成" : "已完成，联网后同步", Toast.LENGTH_SHORT).show();
+            syncInBackground(false);
+        } catch (Exception e) {
+            Toast.makeText(this, "操作失败", Toast.LENGTH_SHORT).show();
+        }
     }
 
-    private void startDiscovery() {
-        if (!isOnline()) {
-            statusText.setText("offline. cannot discover.");
-            return;
+    private void bulkPostponeOverdue(int actionCode) {
+        if (lastGrouped == null || lastGrouped.overdue.isEmpty()) return;
+        String today = DateUtils.today();
+        String targetDate, target, label;
+        if (actionCode == SectionedTaskList.ACTION_POSTPONE_TO_TODAY) {
+            targetDate = today; target = "today";
+            label = "已将 " + lastGrouped.overdue.size() + " 个过期任务推迟到今天";
+        } else if (actionCode == SectionedTaskList.ACTION_POSTPONE_TO_TOMORROW) {
+            targetDate = DateUtils.postponeToTomorrow(today); target = "tomorrow";
+            label = "已将 " + lastGrouped.overdue.size() + " 个过期任务推迟到明天";
+        } else { return; }
+        try {
+            OperationQueue queue = new OperationQueue(repository);
+            for (Task task : lastGrouped.overdue) queue.postpone(task, targetDate, target);
+            renderLocal();
+            Toast.makeText(this, isOnline() ? label : label + "，联网后同步", Toast.LENGTH_SHORT).show();
+            syncInBackground(false);
+        } catch (Exception e) {
+            Toast.makeText(this, "操作失败", Toast.LENGTH_SHORT).show();
         }
-        if (discovery != null && discovery.isRunning()) return;
-        if (discovery != null) discovery.stop();
-        discovery = new ServerDiscovery(new ServerDiscovery.DiscoveryCallback() {
-            @Override public void onServerFound(final String host, final int port) {
-                runOnUiThread(new Runnable() {
-                    @Override public void run() {
-                        if (!isActivityAlive()) return;
-                        final SyncService svc = new SyncService(MainActivity.this);
-                        svc.updateBaseUrl(host, port);
-                        statusText.setText("> discovered " + host + ":" + port);
-                        if (activeSyncTask != null) activeSyncTask.cancel(true);
-                        activeSyncTask = new AsyncTask<Void, Void, SyncResult>() {
-                            @Override protected SyncResult doInBackground(Void... v) {
-                                return svc.performSync();
-                            }
-                            @Override protected void onPostExecute(SyncResult r) {
-                                activeSyncTask = null;
-                                if (!isActivityAlive() || isCancelled()) return;
-                                renderLocal();
-                                if (r.userMessage != null) statusText.setText(r.userMessage);
-                                fetchUsageAsync(svc);
-                            }
-                        }.execute();
-                    }
-                });
+    }
+
+    private void postponeTaskFromList(String taskId, int target) {
+        try {
+            Task task = repository.getTaskById(taskId);
+            if (task == null) return;
+            String today = DateUtils.today();
+            String newDate, label;
+            switch (target) {
+                case 0: newDate = DateUtils.postponeToTomorrow(today); label = "已推迟到明天"; break;
+                case 1: newDate = DateUtils.postponeToWeekend(today);  label = "已推迟到周末"; break;
+                case 2: newDate = DateUtils.postponeToNextWeek(today);  label = "已推迟到下周"; break;
+                default: return;
             }
-            @Override public void onDiscoveryFailed(final String reason) {
-                runOnUiThread(new Runnable() {
-                    @Override public void run() {
-                        if (!isActivityAlive()) return;
-                        statusText.setText("> discovery: " + reason);
-                    }
-                });
-            }
+            String[] targets = {"tomorrow", "weekend", "next_week"};
+            new OperationQueue(repository).postpone(task, newDate, targets[target]);
+            renderLocal();
+            Toast.makeText(this, isOnline() ? label : label + "，联网后同步", Toast.LENGTH_SHORT).show();
+            syncInBackground(false);
+        } catch (Exception e) {
+            Toast.makeText(this, "操作失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showPostponeDialog(final Task task) {
+        CharSequence[] items = {"推迟到明天", "推迟到周末", "推迟到下周"};
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(task.title);
+        builder.setItems(items, new DialogInterface.OnClickListener() {
+            @Override public void onClick(DialogInterface dialog, int which) { postponeTaskFromList(task.id, which); }
         });
-        discovery.start();
+        builder.setNegativeButton("取消", null);
+        builder.create().show();
     }
 
     private void openTask(String taskId) {
@@ -527,15 +336,10 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (data != null) pendingMessage = data.getStringExtra("message");
+        // Settings changed → force a fresh sync with new base URL / auth.
+        if (requestCode == REQUEST_SETTINGS && resultCode == RESULT_OK) {
+            syncInBackground(false);
+        }
         renderLocal();
-    }
-
-    private void addSpace(LinearLayout root, int dp) {
-        View space = new View(this);
-        root.addView(space, new LinearLayout.LayoutParams(1, dp(dp)));
-    }
-
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 }

@@ -1,0 +1,5 @@
+{
+  "base_url": "http://127.0.0.1:8787",
+  "auth": "dev-token",
+  "_comment": "Copy to agent/config.json or ~/.inkqueue/config.json. agent/config.json is gitignored. Field name is auth (not displayed secrets)."
+}

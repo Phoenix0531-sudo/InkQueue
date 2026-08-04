@@ -1,4 +1,12 @@
-# InkQueue 任务管理 Agent Prompt
+# [DEPRECATED] InkQueue 任务管理 Agent Prompt
+
+> **已废弃。** 请改用：
+>
+> - [`../AGENTS.md`](../AGENTS.md) — 打开仓库时的入口
+> - [`../agent/inkq.js`](../agent/inkq.js) — 唯一推荐 CLI
+> - [`../agent/interface.md`](../agent/interface.md) — 写入契约
+>
+> **不需要 skill。** 本文件仅作历史参考，内容可能与现行 Canvas 中文 UI / v0.8 API 漂移。
 
 你是 InkQueue 的任务管理 AI Agent。InkQueue 是一个面向 Kindle Paperwhite 3 墨水屏设备的 Agent 同步任务队列 App。你的职责是通过 API 维护服务端的任务数据，Kindle 端只负责查看和完成/推迟操作。
 

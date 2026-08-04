@@ -19,13 +19,14 @@ public class PendingOperation {
 
     public static PendingOperation complete(String taskId, String completedAt) throws JSONException {
         JSONObject payload = new JSONObject();
-        payload.put("completed_at", completedAt);
         PendingOperation op = new PendingOperation();
         op.id = IdUtils.newId("op");
         op.type = TYPE_COMPLETE;
         op.taskId = taskId;
+        // The server owns completed_at. The argument remains for source compatibility.
         op.payload = payload.toString();
-        op.createdAt = completedAt;
+        // Keep a local queue timestamp for SQLite ordering; it is not sent to the server.
+        op.createdAt = DateUtils.isoNow();
         op.retryCount = 0;
         return op;
     }
@@ -37,6 +38,7 @@ public class PendingOperation {
         op.type = TYPE_POSTPONE;
         op.taskId = taskId;
         op.payload = payload.toString();
+        // Keep a local queue timestamp for SQLite ordering; it is not sent to the server.
         op.createdAt = DateUtils.isoNow();
         op.retryCount = 0;
         return op;
@@ -55,7 +57,7 @@ public class PendingOperation {
         json.put("id", id);
         json.put("type", type);
         json.put("task_id", taskId);
-        json.put("created_at", createdAt);
+        // createdAt is local queue metadata only; the server owns mutation timestamps.
         json.put("payload", payload == null || payload.length() == 0 ? new JSONObject() : new JSONObject(payload));
         return json;
     }

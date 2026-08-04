@@ -140,9 +140,9 @@ public final class DateUtils {
         if (!isEmpty(dueDate)) {
             try {
                 int diff = daysBetween(today, dueDate);
-                if (diff == 0) out.append("today");
-                else if (diff == 1) out.append("tomorrow");
-                else if (diff < 0) out.append("overdue ").append(Math.abs(diff)).append("d");
+                if (diff == 0) out.append("今天");
+                else if (diff == 1) out.append("明天");
+                else if (diff < 0) out.append("已过期 ").append(Math.abs(diff)).append(" 天");
                 else out.append(displayMonthDay(dueDate));
             } catch (IllegalArgumentException e) {
                 out.append(dueDate);
@@ -157,8 +157,14 @@ public final class DateUtils {
     }
 
     public static String displayLastSync(String iso) {
-        if (isEmpty(iso) || iso.length() < 16) return "not synced";
-        return "synced " + iso.substring(11, 16);
+        if (isEmpty(iso) || iso.length() < 16) return "尚未同步";
+        return "已同步 " + iso.substring(11, 16);
+    }
+
+    /** v0.6: short "HH:mm" rendering for Agent-updated timestamp shown on detail page. */
+    public static String displayShortUpdated(String iso) {
+        if (isEmpty(iso) || iso.length() < 16) return "未知";
+        return iso.substring(11, 16);
     }
 
     private static long startOfDayMillis(Calendar calendar) {

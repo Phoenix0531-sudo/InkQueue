@@ -256,13 +256,13 @@
       "id": "task_mrup8n8d_0329e9ea",
       "title": "完成开源操作系统 PPT",
       "note": "竞赛演示用 PPT",
-      "status": "todo",
+      "status": "done",
       "due_date": "2026-07-12",
       "due_time": null,
       "priority": "normal",
       "created_at": "2026-07-21T21:38:32+08:00",
-      "updated_at": "2026-07-21T21:38:32+08:00",
-      "completed_at": null,
+      "updated_at": "2026-08-01T22:57:12+08:00",
+      "completed_at": "2026-08-01T22:57:12+08:00",
       "source": "agent",
       "force_today": false
     },
@@ -270,13 +270,13 @@
       "id": "task_mrup8n8k_7f37425f",
       "title": "完成开源操作系统文档",
       "note": "最终版文档整理",
-      "status": "todo",
+      "status": "done",
       "due_date": "2026-07-12",
       "due_time": null,
       "priority": "normal",
       "created_at": "2026-07-21T21:38:32+08:00",
-      "updated_at": "2026-07-21T21:38:32+08:00",
-      "completed_at": null,
+      "updated_at": "2026-08-01T22:57:19+08:00",
+      "completed_at": "2026-08-01T22:57:19+08:00",
       "source": "agent",
       "force_today": false
     },
@@ -284,13 +284,13 @@
       "id": "task_mrup8n8q_e6f067da",
       "title": "制作演示视频",
       "note": "竞赛提交用演示视频",
-      "status": "todo",
+      "status": "done",
       "due_date": "2026-07-12",
       "due_time": null,
       "priority": "normal",
       "created_at": "2026-07-21T21:38:32+08:00",
-      "updated_at": "2026-07-21T21:38:32+08:00",
-      "completed_at": null,
+      "updated_at": "2026-08-01T22:57:08+08:00",
+      "completed_at": "2026-08-01T22:57:08+08:00",
       "source": "agent",
       "force_today": false
     },
@@ -298,13 +298,13 @@
       "id": "task_mrup8n8w_7d46ccb9",
       "title": "提交竞赛材料",
       "note": "PPT + 文档 + 视频 打包提交",
-      "status": "todo",
+      "status": "done",
       "due_date": "2026-07-12",
       "due_time": null,
       "priority": "high",
       "created_at": "2026-07-21T21:38:32+08:00",
-      "updated_at": "2026-07-21T21:38:32+08:00",
-      "completed_at": null,
+      "updated_at": "2026-08-01T22:35:52+08:00",
+      "completed_at": "2026-08-01T22:35:52+08:00",
       "source": "agent",
       "force_today": false
     },
@@ -312,13 +312,13 @@
       "id": "task_mrup8n93_2585ddac",
       "title": "汪伟理论测试实验",
       "note": null,
-      "status": "todo",
+      "status": "done",
       "due_date": "2026-07-12",
       "due_time": null,
       "priority": "normal",
       "created_at": "2026-07-21T21:38:32+08:00",
-      "updated_at": "2026-07-21T21:38:32+08:00",
-      "completed_at": null,
+      "updated_at": "2026-08-01T23:05:28+08:00",
+      "completed_at": "2026-08-01T23:05:28+08:00",
       "source": "agent",
       "force_today": false
     },
@@ -327,11 +327,11 @@
       "title": "跑大宛齐高宽比数据",
       "note": "新的大宛齐实验数据，分析高宽比。",
       "status": "todo",
-      "due_date": "2026-07-12",
+      "due_date": "2026-08-05",
       "due_time": null,
       "priority": "normal",
       "created_at": "2026-07-21T21:38:32+08:00",
-      "updated_at": "2026-07-21T21:38:32+08:00",
+      "updated_at": "2026-08-04T10:19:30+08:00",
       "completed_at": null,
       "source": "agent",
       "force_today": false
@@ -340,13 +340,13 @@
       "id": "task_mrup8n9g_57e15273",
       "title": "完成颗粒追踪程序",
       "note": null,
-      "status": "todo",
-      "due_date": "2026-07-12",
+      "status": "done",
+      "due_date": "2026-08-03",
       "due_time": null,
       "priority": "normal",
       "created_at": "2026-07-21T21:38:32+08:00",
-      "updated_at": "2026-07-21T21:38:32+08:00",
-      "completed_at": null,
+      "updated_at": "2026-08-04T10:02:14+08:00",
+      "completed_at": "2026-08-04T10:02:14+08:00",
       "source": "agent",
       "force_today": false
     },
@@ -354,15 +354,367 @@
       "id": "task_mrup8na0_d8f6813f",
       "title": "修改新文章",
       "note": "针对审稿意见或自检修改",
-      "status": "todo",
-      "due_date": "2026-07-12",
+      "status": "done",
+      "due_date": "2026-08-02",
       "due_time": null,
       "priority": "normal",
       "created_at": "2026-07-21T21:38:32+08:00",
-      "updated_at": "2026-07-21T21:38:32+08:00",
+      "updated_at": "2026-08-02T09:06:03+08:00",
+      "completed_at": "2026-08-02T09:06:03+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_mse0l2he_9fde1a1a",
+      "title": "E2E推迟测试任务",
+      "note": "v0.8.1真机回归用",
+      "status": "done",
+      "due_date": "2026-08-04",
+      "due_time": "15:00",
+      "priority": "high",
+      "created_at": "2026-08-04T10:03:44+08:00",
+      "updated_at": "2026-08-04T10:10:49+08:00",
+      "completed_at": "2026-08-04T10:10:49+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_mse0lmzh_27f78911",
+      "title": "E2E完成测试任务",
+      "note": "完成这个验证 complete 流程",
+      "status": "done",
+      "due_date": "2026-08-05",
+      "due_time": "16:00",
+      "priority": "normal",
+      "created_at": "2026-08-04T10:04:11+08:00",
+      "updated_at": "2026-08-04T10:17:25+08:00",
+      "completed_at": "2026-08-04T10:17:23+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_mse0wftr_ca1bb1c0",
+      "title": "E2E推迟测试任务B",
+      "note": "专门测 postpone 到明天",
+      "status": "done",
+      "due_date": "2026-08-05",
+      "due_time": "17:30",
+      "priority": "normal",
+      "created_at": "2026-08-04T10:12:35+08:00",
+      "updated_at": "2026-08-04T20:42:49+08:00",
+      "completed_at": "2026-08-04T20:42:49+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_mse1rn3j_e8760800",
+      "title": "v082同步验证",
+      "note": "测 leak+phase",
+      "status": "done",
+      "due_date": "2026-08-04",
+      "due_time": "18:00",
+      "priority": "normal",
+      "created_at": "2026-08-04T10:36:51+08:00",
+      "updated_at": "2026-08-04T10:41:05+08:00",
+      "completed_at": "2026-08-04T10:41:05+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_mse1x6np_d30ac0db",
+      "title": "v082推迟验证",
+      "note": "测 postpone+leak",
+      "status": "done",
+      "due_date": "2026-08-05",
+      "due_time": "19:00",
+      "priority": "normal",
+      "created_at": "2026-08-04T10:41:09+08:00",
+      "updated_at": "2026-08-04T20:42:49+08:00",
+      "completed_at": "2026-08-04T20:42:49+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_mseiyd2i_6ade5d68",
+      "title": "inkq-smoke-mseiycx1",
+      "note": "agent smoke",
+      "status": "done",
+      "due_date": "2026-08-05",
+      "due_time": null,
+      "priority": "high",
+      "created_at": "2026-08-04T18:37:58+08:00",
+      "updated_at": "2026-08-04T20:42:22+08:00",
+      "completed_at": "2026-08-04T20:42:22+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_msejg976_f87b749f",
+      "title": "核对 InkQueue agent 层文档是否一致",
+      "note": "确认 AGENTS.md / agent/README / architecture 主路径为 inkq，不依赖 skill",
+      "status": "todo",
+      "due_date": "2026-08-05",
+      "due_time": null,
+      "priority": "normal",
+      "created_at": "2026-08-04T18:51:53+08:00",
+      "updated_at": "2026-08-04T20:01:43+08:00",
       "completed_at": null,
       "source": "agent",
       "force_today": false
+    },
+    {
+      "id": "task_msejg9b1_4f0f4b14",
+      "title": "Kindle 同步看今日队列",
+      "note": "设备打开任务 App 点同步，确认今日两条出现",
+      "status": "done",
+      "due_date": "2026-08-04",
+      "due_time": "20:00",
+      "priority": "high",
+      "created_at": "2026-08-04T18:51:53+08:00",
+      "updated_at": "2026-08-04T19:56:52+08:00",
+      "completed_at": "2026-08-04T19:56:52+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_msejg9ve_eea0052b",
+      "title": "inkq-smoke-msejg9s4",
+      "note": "agent smoke",
+      "status": "done",
+      "due_date": "2026-08-05",
+      "due_time": null,
+      "priority": "high",
+      "created_at": "2026-08-04T18:51:53+08:00",
+      "updated_at": "2026-08-04T20:42:49+08:00",
+      "completed_at": "2026-08-04T20:42:49+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_msen5klh_d3d11ec0",
+      "title": "inkq-smoke-msen5ki9",
+      "note": "agent smoke",
+      "status": "done",
+      "due_date": "2026-08-05",
+      "due_time": null,
+      "priority": "high",
+      "created_at": "2026-08-04T20:35:33+08:00",
+      "updated_at": "2026-08-04T20:42:49+08:00",
+      "completed_at": "2026-08-04T20:42:49+08:00",
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_msenfa8n_7a6eb424",
+      "title": "回顾 InkQueue agent 层主路径",
+      "note": "打开 AGENTS.md / agent/interface.md，确认日常只走 inkq，不装 skill。",
+      "status": "todo",
+      "due_date": "2026-08-04",
+      "due_time": null,
+      "priority": "normal",
+      "created_at": "2026-08-04T20:43:06+08:00",
+      "updated_at": "2026-08-04T20:43:06+08:00",
+      "completed_at": null,
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_msenfacm_de62d00c",
+      "title": "规划 MCP 包装范围",
+      "note": "先定 inkq 薄封装，不复制协议；工具名对齐 health/context/list/add/patch/events。",
+      "status": "todo",
+      "due_date": "2026-08-04",
+      "due_time": null,
+      "priority": "normal",
+      "created_at": "2026-08-04T20:43:06+08:00",
+      "updated_at": "2026-08-04T20:43:06+08:00",
+      "completed_at": null,
+      "source": "agent",
+      "force_today": false
+    },
+    {
+      "id": "task_msenfagh_56fcc555",
+      "title": "整理 events 语义草案",
+      "note": "区分 complete / postpone 目标 / 重复推迟；给 Agent 可读信号，不堆 raw op。",
+      "status": "todo",
+      "due_date": "2026-08-04",
+      "due_time": null,
+      "priority": "normal",
+      "created_at": "2026-08-04T20:43:06+08:00",
+      "updated_at": "2026-08-04T20:43:06+08:00",
+      "completed_at": null,
+      "source": "agent",
+      "force_today": false
+    }
+  ],
+  "operations": [
+    {
+      "id": "op_1785594946123_3f8ac7",
+      "task_id": "task_mrup8n8w_7d46ccb9",
+      "applied_at": "2026-08-01T22:35:52+08:00"
+    },
+    {
+      "id": "op_1785595022226_1d6ff4",
+      "task_id": "task_mrup8na0_d8f6813f",
+      "applied_at": "2026-08-01T22:37:08+08:00"
+    },
+    {
+      "id": "op_1785596227129_c3b541",
+      "task_id": "task_mrup8n8q_e6f067da",
+      "applied_at": "2026-08-01T22:57:08+08:00"
+    },
+    {
+      "id": "op_1785596230910_7fd223",
+      "task_id": "task_mrup8n8d_0329e9ea",
+      "applied_at": "2026-08-01T22:57:12+08:00"
+    },
+    {
+      "id": "op_1785596237238_85450e",
+      "task_id": "task_mrup8n8k_7f37425f",
+      "applied_at": "2026-08-01T22:57:19+08:00"
+    },
+    {
+      "id": "op_1785596726835_ea89a5",
+      "task_id": "task_mrup8n93_2585ddac",
+      "applied_at": "2026-08-01T23:05:28+08:00"
+    },
+    {
+      "id": "op_1785599260158_c516eb",
+      "task_id": "task_mrup8na0_d8f6813f",
+      "applied_at": "2026-08-01T23:47:42+08:00"
+    },
+    {
+      "id": "op_1785599343979_810ed6",
+      "task_id": "task_mrup8n9g_57e15273",
+      "applied_at": "2026-08-01T23:49:06+08:00"
+    },
+    {
+      "id": "op_1785632723496_204ae0",
+      "task_id": "task_mrup8n9a_f0ae8f3d",
+      "task_title": "跑大宛齐高宽比数据",
+      "type": "postpone",
+      "payload": {
+        "due_date": "2026-08-02",
+        "postpone_target": "today"
+      },
+      "applied_at": "2026-08-02T09:05:26+08:00"
+    },
+    {
+      "id": "op_1785632760234_5c22bf",
+      "task_id": "task_mrup8na0_d8f6813f",
+      "task_title": "修改新文章",
+      "type": "complete",
+      "payload": {},
+      "applied_at": "2026-08-02T09:06:03+08:00"
+    },
+    {
+      "id": "op_1785808931522_27607f",
+      "task_id": "task_mrup8n9g_57e15273",
+      "task_title": "完成颗粒追踪程序",
+      "type": "complete",
+      "payload": {},
+      "applied_at": "2026-08-04T10:02:14+08:00"
+    },
+    {
+      "id": "op_1785809182718_fc3be1",
+      "task_id": "task_mrup8n9a_f0ae8f3d",
+      "task_title": "跑大宛齐高宽比数据",
+      "type": "postpone",
+      "payload": {
+        "due_date": "2026-08-04",
+        "postpone_target": "today"
+      },
+      "applied_at": "2026-08-04T10:06:25+08:00"
+    },
+    {
+      "id": "op_1785809446760_cb7d41",
+      "task_id": "task_mse0l2he_9fde1a1a",
+      "task_title": "E2E推迟测试任务",
+      "type": "complete",
+      "payload": {},
+      "applied_at": "2026-08-04T10:10:49+08:00"
+    },
+    {
+      "id": "op_1785809841033_6c188f",
+      "task_id": "task_mse0lmzh_27f78911",
+      "task_title": "E2E完成测试任务",
+      "type": "complete",
+      "payload": {},
+      "applied_at": "2026-08-04T10:17:23+08:00"
+    },
+    {
+      "id": "op_1785809842561_1df7d4",
+      "task_id": "task_mse0lmzh_27f78911",
+      "task_title": "E2E完成测试任务",
+      "type": "postpone",
+      "payload": {
+        "due_date": "2026-08-05",
+        "postpone_target": "tomorrow",
+        "due_time": "16:00"
+      },
+      "applied_at": "2026-08-04T10:17:25+08:00"
+    },
+    {
+      "id": "op_1785809967839_28ac6b",
+      "task_id": "task_mrup8n9a_f0ae8f3d",
+      "task_title": "跑大宛齐高宽比数据",
+      "type": "postpone",
+      "payload": {
+        "due_date": "2026-08-05",
+        "postpone_target": "tomorrow"
+      },
+      "applied_at": "2026-08-04T10:19:30+08:00"
+    },
+    {
+      "id": "op_1785810003945_7d0238",
+      "task_id": "task_mse0wftr_ca1bb1c0",
+      "task_title": "E2E推迟测试任务B",
+      "type": "postpone",
+      "payload": {
+        "due_date": "2026-08-05",
+        "postpone_target": "tomorrow",
+        "due_time": "17:30"
+      },
+      "applied_at": "2026-08-04T10:20:06+08:00"
+    },
+    {
+      "id": "op_1785811262342_a0a9f9",
+      "task_id": "task_mse1rn3j_e8760800",
+      "task_title": "v082同步验证",
+      "type": "complete",
+      "payload": {},
+      "applied_at": "2026-08-04T10:41:05+08:00"
+    },
+    {
+      "id": "op_1785811327793_54b70c",
+      "task_id": "task_mse1x6np_d30ac0db",
+      "task_title": "v082推迟验证",
+      "type": "postpone",
+      "payload": {
+        "due_date": "2026-08-05",
+        "postpone_target": "tomorrow",
+        "due_time": "19:00"
+      },
+      "applied_at": "2026-08-04T10:42:10+08:00"
+    },
+    {
+      "id": "op_1785844607187_7d7936",
+      "task_id": "task_msejg9b1_4f0f4b14",
+      "task_title": "Kindle 同步看今日队列",
+      "type": "complete",
+      "payload": {},
+      "applied_at": "2026-08-04T19:56:52+08:00"
+    },
+    {
+      "id": "op_1785844897843_afa200",
+      "task_id": "task_msejg976_f87b749f",
+      "task_title": "核对 InkQueue agent 层文档是否一致",
+      "type": "postpone",
+      "payload": {
+        "due_date": "2026-08-05",
+        "postpone_target": "tomorrow"
+      },
+      "applied_at": "2026-08-04T20:01:43+08:00"
     }
   ]
 }

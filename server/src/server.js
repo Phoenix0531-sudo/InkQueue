@@ -5,7 +5,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
-const https = require('https');
 const tls = require('tls');
 const cliproxy = require('./cliproxy');
 
@@ -16,106 +15,7 @@ const DATA_FILE = process.env.INKQUEUE_DATA_FILE || path.join(__dirname, '..', '
 const CONFIG_FILE = process.env.INKQUEUE_CONFIG_FILE || path.join(__dirname, '..', 'data', 'config.json');
 const VALID_STATUSES = new Set(['todo', 'done', 'archived']);
 const VALID_PRIORITIES = new Set(['normal', 'high']);
-
-const GO_FALLBACK = {
-  plan: 'go',
-  windows: {
-    rolling: { usage_percent: 0, resets_in_seconds: 18000, label: '5-hour', max_cost: 12 },
-    weekly: { usage_percent: 0, resets_in_seconds: 604800, label: 'weekly', max_cost: 30 },
-    monthly: { usage_percent: 0, resets_in_seconds: 2592000, label: 'monthly', max_cost: 60 }
-  }
-};
-
-const GO_LIMITS = { rolling: 12, weekly: 30, monthly: 60 }; // dollars
-
-function findOpenCodeDB() {
-  const homedir = os.homedir();
-  const candidates = [
-    path.join(homedir, '.local', 'share', 'opencode', 'opencode.db'),
-    path.join(process.env.APPDATA || '', 'opencode', 'opencode.db'),
-    path.join(process.env.LOCALAPPDATA || '', 'opencode', 'opencode.db'),
-  ];
-  // Also try under USERPROFILE/.local/share/opencode/
-  if (process.env.USERPROFILE) {
-    candidates.push(path.join(process.env.USERPROFILE, '.local', 'share', 'opencode', 'opencode.db'));
-  }
-  for (const p of candidates) {
-    try { if (fs.statSync(p).isFile()) return p; } catch (e) { /* not found */ }
-  }
-  return null;
-}
-
-function readOpenCodeUsageFromLocalDB() {
-  const dbPath = findOpenCodeDB();
-  if (!dbPath) return null;
-  try {
-    const DB = require('better-sqlite3');
-    const db = new DB(dbPath, { readonly: true, fileMustExist: true });
-    const now = Date.now(); // time_created is in milliseconds in this DB
-    const windows = {
-      rolling: { start: now - 5 * 3600 * 1000, max: GO_LIMITS.rolling, label: '5-hour' },
-      weekly: { start: now - 7 * 24 * 3600 * 1000, max: GO_LIMITS.weekly, label: 'weekly' },
-      monthly: { start: now - 30 * 24 * 3600 * 1000, max: GO_LIMITS.monthly, label: 'monthly' }
-    };
-    const result = { plan: 'go', windows: {}, source: 'local_db' };
-    let hasData = false;
-    for (const [key, w] of Object.entries(windows)) {
-      const row = db.prepare("SELECT COALESCE(SUM(cost),0) as total FROM session WHERE cost > 0 AND time_created > ?").get(w.start);
-      const used = row ? row.total : 0;
-      const pct = w.max > 0 ? Math.min(Math.round(used / w.max * 100), 100) : 0;
-      result.windows[key] = { usage_percent: pct, resets_in_seconds: 3600, label: w.label, max_cost: w.max, used_cost: Math.round(used * 100) / 100 };
-      if (used > 0) hasData = true;
-    }
-    // Also compute total all-time cost for reference
-    const totalRow = db.prepare("SELECT COALESCE(SUM(cost),0) as total FROM session WHERE cost > 0").get();
-    if (totalRow && totalRow.total > 0) {
-      result.total_cost = Math.round(totalRow.total * 100) / 100;
-      result.last_session = new Date(db.prepare("SELECT MAX(time_created) as t FROM session WHERE cost > 0").get().t).toISOString();
-    }
-    db.close();
-    if (hasData || result.total_cost > 0) return result;
-    return null; // no data yet, let fallback handle it
-  } catch (e) {
-    console.log('OpenCode DB read error:', e.message);
-    return null;
-  }
-}
-
-// Read usage data from CC Switch's database (covers codex, claude, opencode)
-function readFromCCSwitchDB() {
-  const dbPaths = [
-    path.join(os.homedir(), '.cc-switch', 'cc-switch.db'),
-    path.join(process.env.APPDATA || '', 'cc-switch', 'cc-switch.db'),
-  ];
-  let dbPath = null;
-  for (const p of dbPaths) { try { if (fs.statSync(p).isFile()) { dbPath = p; break; } } catch(e) {} }
-  if (!dbPath) return null;
-  try {
-    const DB = require('better-sqlite3');
-    const db = new DB(dbPath, { readonly: true, timeout: 2000 });
-    const now = new Date();
-    const dayStart = (d) => d.toISOString().slice(0, 10);
-    const windowDays = {
-      rolling: { label: '5-hour', days: 0 }, // 5h = same day
-      weekly: { label: 'weekly', days: 7 },
-      monthly: { label: 'monthly', days: 30 }
-    };
-  const result = { source: 'ccswitch', providers: {} };
-  for (const [key, w] of Object.entries(windowDays)) {
-    const startDate = key === 'rolling' ? dayStart(now) : dayStart(new Date(now - w.days * 86400000));
-    const rows = db.prepare("SELECT app_type, SUM(CAST(total_cost_usd AS REAL)) as cost, SUM(input_tokens+output_tokens) as tokens FROM usage_daily_rollups WHERE date >= ? GROUP BY app_type").all(startDate);
-    for (const row of rows) {
-      if (!row.cost || parseFloat(row.cost) === 0) continue;
-      if (!result.providers[row.app_type]) result.providers[row.app_type] = {};
-      result.providers[row.app_type][key] = { cost: Math.round(parseFloat(row.cost) * 100) / 100, tokens: row.tokens };
-    }
-  }
-  db.close();
-  return Object.keys(result.providers).length > 0 ? result : null;
-} catch (e) {
-  return null;
-}
-}
+const MAX_WEBHOOK_ITEMS = 50;
 
 let usageCache = { data: null, timestamp: 0 };
 const USAGE_CACHE_TTL = 8000;
@@ -217,6 +117,19 @@ function nowIso() {
   return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}+08:00`;
 }
 
+// Compare ISO strings in product timezone (+08:00 cut-off vs +08:00 applied_at).
+// For ages involving the present moment we must subtract in product time.
+function nowIsoMinusSeconds(seconds) {
+  const d = new Date(Date.now() - seconds * 1000);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).formatToParts(d);
+  const get = (type) => { const p = parts.find((x) => x.type === type); return p ? p.value : '00'; };
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}+08:00`;
+}
+
 function ensureDataFile() {
   fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
   if (!fs.existsSync(DATA_FILE)) {
@@ -236,7 +149,7 @@ function readStore() {
 function writeStore(store) {
   ensureDataFile();
   const tmp = `${DATA_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ tasks: store.tasks }, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
   fs.renameSync(tmp, DATA_FILE);
 }
 
@@ -245,122 +158,8 @@ function readConfig() {
     const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
     return JSON.parse(raw);
   } catch (e) {
-    return { opencode_api_key: '' };
+    return {};
   }
-}
-
-async function fetchOpenCodeUsage() {
-  // Priority 1: Local SQLite database (most accurate)
-  const localData = readOpenCodeUsageFromLocalDB();
-  if (localData) return { provider: 'opencode-go', error: null, data: localData };
-
-  // Priority 2: Try web API (if deployed)
-  const config = readConfig();
-  if (config.opencode_api_key) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      const res = await fetch('https://opencode.ai/api/v1/usage/plan', {
-        headers: { 'Authorization': 'Bearer ' + config.opencode_api_key },
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
-      if (res.ok) return { provider: 'opencode-go', error: null, data: await res.json() };
-    } catch (e) { /* fall through to fallback */ }
-  }
-
-  // Priority 3: Fallback with plan limits
-  return { provider: 'opencode-go', error: null, data: GO_FALLBACK };
-}
-
-async function refreshCodexToken(auth) {
-  const tokens = auth.tokens || (auth.accounts && auth.accounts[0] && auth.accounts[0].token);
-  if (!tokens || !tokens.refresh_token) return null;
-  try {
-    const url = 'https://auth0.openai.com/oauth/token';
-    const body = JSON.stringify({ grant_type: 'refresh_token',
-      client_id: 'p2gNDZ5pN4P6TMg7bT6Xg8T8T8T8T8T8T8T8T8',
-      refresh_token: tokens.refresh_token });
-    const res = await proxiedFetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.access_token;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function fetchCodexUsage() {
-  const config = readConfig();
-  const authPath = config.codex_auth_path ? path.resolve(os.homedir(), config.codex_auth_path.replace(/^~\/?/, '')) : path.join(os.homedir(), '.codex', 'auth.json');
-  let auth = null;
-  try {
-    const raw = fs.readFileSync(authPath, 'utf8');
-    auth = JSON.parse(raw);
-  } catch (e) {
-    return { provider: 'chatgpt-plus', error: 'not logged in', data: null };
-  }
-
-  let accessToken = null;
-  if (auth.tokens && auth.tokens.access_token) {
-    accessToken = auth.tokens.access_token;
-  } else if (auth.accounts && auth.accounts.length > 0 && auth.accounts[0].token) {
-    accessToken = auth.accounts[0].token.access_token;
-  } else if (auth.access_token) {
-    accessToken = auth.access_token;
-  }
-  if (!accessToken) {
-    return { provider: 'chatgpt-plus', error: 'no access token', data: null };
-  }
-
-  try {
-    const res = await proxiedFetch('https://chatgpt.com/backend-api/wham/usage', {
-      headers: { 'Authorization': 'Bearer ' + accessToken },
-    });
-    if (res.status === 401 || res.status === 403) {
-      // Try refreshing the token
-      const newToken = await refreshCodexToken(auth);
-      if (newToken) {
-        const retry = await proxiedFetch('https://chatgpt.com/backend-api/wham/usage', {
-          headers: { 'Authorization': 'Bearer ' + newToken },
-        });
-        if (retry.ok) return parseCodexResponse(await retry.json());
-      }
-      return { provider: 'chatgpt-plus', error: 'token expired, run: codex', data: null };
-    }
-    if (!res.ok) {
-      return { provider: 'chatgpt-plus', error: 'API ' + res.status, data: null };
-    }
-    const json = await res.json();
-    return parseCodexResponse(json);
-  } catch (e) {
-    const msg = e.message || '';
-    if (msg.includes('connect') || msg.includes('socket') || msg.includes('ECONNREFUSED')) {
-      return { provider: 'chatgpt-plus', error: 'proxy: ' + msg.slice(0, 80), data: null };
-    }
-    if (msg.includes('timeout') || msg.includes('aborted')) {
-      return { provider: 'chatgpt-plus', error: 'proxy timeout', data: null };
-    }
-    return { provider: 'chatgpt-plus', error: msg.slice(0, 100), data: null };
-  }
-}
-
-function parseCodexResponse(json) {
-  const primary = json.rate_limit && json.rate_limit.primary_window ? {
-    usage_percent: json.rate_limit.primary_window.percent,
-    resets_in_seconds: json.rate_limit.primary_window.resets_in_seconds,
-    label: '5-hour'
-  } : null;
-  const secondary = json.rate_limit && json.rate_limit.secondary_window ? {
-    usage_percent: json.rate_limit.secondary_window.percent,
-    resets_in_seconds: json.rate_limit.secondary_window.resets_in_seconds,
-    label: 'weekly'
-  } : null;
-  return { provider: 'chatgpt-plus', error: null, data: { primary, secondary } };
 }
 
 function sumByTypeField(byType, field) {
@@ -770,7 +569,8 @@ function publicTask(task) {
 
 function applyComplete(task, op, serverTime) {
   task.status = 'done';
-  task.completed_at = nullableString(op.payload && op.payload.completed_at) || serverTime;
+  // The reference server owns mutation timestamps. Device timestamps are hints only.
+  task.completed_at = serverTime;
   task.updated_at = serverTime;
 }
 
@@ -782,6 +582,111 @@ function applyPostpone(task, op, serverTime) {
   task.due_date = String(payload.due_date);
   if (Object.prototype.hasOwnProperty.call(payload, 'due_time')) task.due_time = nullableString(payload.due_time);
   task.updated_at = serverTime;
+}
+
+function operationStore(store) {
+  if (!Array.isArray(store.operations)) store.operations = [];
+  return store.operations;
+}
+
+function hasAppliedOperation(store, operationId) {
+  return operationStore(store).some((item) => item.id === operationId);
+}
+
+function rememberOperation(store, operationId, taskId, serverTime, opType, payload, taskTitle) {
+  operationStore(store).push({
+    id: operationId,
+    task_id: taskId,
+    task_title: taskTitle || null,
+    type: opType || null,
+    payload: payload || null,
+    applied_at: serverTime
+  });
+}
+
+// Agent-facing event stream: externalised view of operations.
+// Each event has stable id (= operation id) so an Agent can poll safely.
+function eventFromOperation(op, task) {
+  return {
+    event_id: op.id,
+    type: op.type,
+    task_id: op.task_id,
+    task_title: op.task_title || (task ? task.title : null),
+    occurred_at: op.applied_at,
+    payload: op.payload || null
+  };
+}
+
+function listEvents(store, sinceIso) {
+  const ops = operationStore(store).slice().sort((a, b) => a.applied_at.localeCompare(b.applied_at));
+  const events = ops.map((op) => {
+    const task = store.tasks.find((t) => t.id === op.task_id);
+    return eventFromOperation(op, task);
+  });
+  if (!sinceIso) return events;
+  return events.filter((e) => e.occurred_at > sinceIso);
+}
+
+// Returns YYYY-MM-DD of this week's Sunday (Beijing week: Mon..Sun)
+function endOfWeek(todayIso) {
+  const d = new Date(`${todayIso}T00:00:00Z`);
+  // getUTCDay: 0=Sun..6=Sat. We want Sun of this week (or today if Sun).
+  let daysToSunday = (7 - d.getUTCDay()) % 7;
+  d.setUTCDate(d.getUTCDate() + daysToSunday);
+  return d.toISOString().slice(0, 10);
+}
+
+function buildAgentSuggestion(overdue, todayCount, weekCount, recentDone, recentPostpones) {
+  if (overdue >= 5) return '过期任务偏多，建议先安排过期清理或批量推迟，再考虑新增任务';
+  if (todayCount === 0) return '今日还没有任务，建议补 2-3 个今日任务';
+  if (todayCount >= 8) return '今日任务偏多，墨水屏用户处理节奏有限，建议控制在 3-5 个';
+  if (recentPostpones > recentDone && recentDone + recentPostpones > 0) {
+    return '设备方最近推迟次数多于完成，可考虑核对任务日期合理性';
+  }
+  return '节奏正常，可继续按过去 7 天节奏安排本周任务';
+}
+
+// P8: Outbound webhook to Agent — fire-and-forget push of device events.
+// Reads agent_webhook_url from data/config.json (or INKQUEUE_AGENT_WEBHOOK_URL env).
+// Failures are logged but never block the response path.
+function agentWebhookUrl() {
+  if (process.env.INKQUEUE_AGENT_WEBHOOK_URL) return process.env.INKQUEUE_AGENT_WEBHOOK_URL;
+  try {
+    const cfg = readConfig();
+    if (cfg && typeof cfg.agent_webhook_url === 'string') return cfg.agent_webhook_url;
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+function notifyAgentWebhook(event) {
+  const url = agentWebhookUrl();
+  if (!url) return;
+  setImmediate(() => {
+    try {
+      const body = JSON.stringify(event);
+      const req = http.request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        timeout: 5000
+      });
+      req.on('error', () => { /* fire-and-forget */ });
+      req.on('timeout', () => { req.destroy(); });
+      req.write(body);
+      req.end();
+    } catch (e) { /* fire-and-forget */ }
+  });
+}
+
+function webhookTasks(input) {
+  if (Array.isArray(input.tasks)) return input.tasks;
+  if (input.task && typeof input.task === 'object') return [input.task];
+  if (input.title !== undefined) return [input];
+  return [];
+}
+
+function webhookEventId(input) {
+  const value = input.event_id || input.idempotency_key || input.eventId;
+  return value ? String(value) : null;
 }
 
 function tokenFromQuery(url) {
@@ -866,6 +771,54 @@ async function handleRequest(req, res) {
     sendJson(res, 200, { server_time: nowIso(), tasks: store.tasks.map(publicTask) }); return;
   }
 
+  if (req.method === 'GET' && url.pathname === '/v1/events') {
+    const store = readStore();
+    const since = url.searchParams.get('since') || '';
+    const limitParam = Number(url.searchParams.get('limit') || 0);
+    let events = listEvents(store, since);
+    if (limitParam > 0 && events.length > limitParam) {
+      events = events.slice(events.length - limitParam);
+    }
+    const latest = events.length ? events[events.length - 1].occurred_at : null;
+    sendJson(res, 200, { server_time: nowIso(), events, latest_event_at: latest }); return;
+  }
+
+  // Agent scheduling context: helps an Agent decide how many tasks / what cadence to push.
+  if (req.method === 'GET' && url.pathname === '/v1/agent/context') {
+    const store = readStore();
+    const today = nowIso().slice(0, 10);
+    const tasks = store.tasks.filter((t) => t.status !== 'archived');
+    const open = tasks.filter((t) => t.status === 'todo');
+    const done = tasks.filter((t) => t.status === 'done');
+    let overdue = 0, todayCount = 0, weekCount = 0, laterCount = 0;
+    for (const t of open) {
+      if (!t.due_date) { laterCount++; continue; }
+      if (t.due_date < today) overdue++;
+      else if (t.due_date === today) todayCount++;
+      else if (t.due_date <= endOfWeek(today)) weekCount++;
+      else laterCount++;
+    }
+    // Completed-in-last-7-days histogram (Agent rhythm signal)
+    const sevenAgo = nowIsoMinusSeconds(7 * 86400);
+    const recentDone = done.filter((t) => t.completed_at && t.completed_at >= sevenAgo).length;
+    // Operations in last 24 hours (Agent activity signal)
+    const dayAgo = nowIsoMinusSeconds(86400);
+    const ops = operationStore(store);
+    const recentOps = ops.filter((o) => o.applied_at >= dayAgo);
+    const recentCompletes = recentOps.filter((o) => o.type === 'complete').length;
+    const recentPostpones = recentOps.filter((o) => o.type === 'postpone').length;
+    sendJson(res, 200, {
+      server_time: nowIso(),
+      today_date: today,
+      open: { overdue, today: todayCount, this_week: weekCount, later: laterCount, total: open.length },
+      done_total: done.length,
+      completed_last_7d: recentDone,
+      device_activity_24h: { completes: recentCompletes, postpones: recentPostpones },
+      suggestion: {
+        note: buildAgentSuggestion(overdue, todayCount, weekCount, recentDone, recentPostpones)
+      }
+    }); return;
+  }
   if (req.method === 'POST' && url.pathname === '/v1/tasks') {
     const input = await readBody(req);
     validateTaskInput(input, true);
@@ -909,17 +862,65 @@ async function handleRequest(req, res) {
       try {
         if (!op || typeof op !== 'object') throw new Error('operation must be an object');
         if (!op.task_id) throw new Error('operation requires task_id');
+        if (hasAppliedOperation(store, opId)) {
+          accepted.push(opId);
+          continue;
+        }
         const task = store.tasks.find((item) => item.id === op.task_id);
         if (!task || task.status === 'archived') { ignored.push(opId); continue; }
         if (op.type === 'complete') { applyComplete(task, op, serverTime); }
         else if (op.type === 'postpone') { applyPostpone(task, op, serverTime); }
         else { throw new Error(`unsupported operation type: ${op.type}`); }
+        rememberOperation(store, opId, String(op.task_id), serverTime,
+            op.type, op.payload || null, task.title);
         accepted.push(opId);
+        // P8: fire-and-forget outbound webhook to Agent (if configured)
+        notifyAgentWebhook({ event_id: opId, type: op.type, task_id: String(op.task_id),
+            task_title: task.title, occurred_at: serverTime, payload: op.payload || null });
       } catch (err) { errors.push({ id: opId, error: err.message }); }
     }
 
     if (accepted.length || ignored.length) writeStore(store);
     sendJson(res, 200, { server_time: nowIso(), accepted, ignored, errors }); return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/v1/webhook/agent') {
+    const input = await readBody(req);
+    const eventId = webhookEventId(input);
+    const store = readStore();
+    const eventStore = operationStore(store);
+    if (eventId && eventStore.some((item) => item.webhook_event_id === eventId)) {
+      sendJson(res, 200, { event_id: eventId, duplicate: true, created: [], updated: [] }); return;
+    }
+    const created = [];
+    const updated = [];
+    const tasks = webhookTasks(input);
+    if (!tasks.length || tasks.length > MAX_WEBHOOK_ITEMS) {
+      throw new HttpError(400, `tasks must contain 1-${MAX_WEBHOOK_ITEMS} items`);
+    }
+    for (const item of tasks) {
+      if (!item || typeof item !== 'object') throw new HttpError(400, 'task must be an object');
+      const taskInput = { ...item, source: item.source || 'agent' };
+      validateTaskInput(taskInput, !item.id);
+      const index = item.id ? store.tasks.findIndex((task) => task.id === String(item.id)) : -1;
+      if (index === -1) {
+        const task = normalizeTask(taskInput, null);
+        store.tasks.push(task);
+        created.push(publicTask(task));
+      } else {
+        const allowed = {};
+        for (const key of ['title', 'note', 'status', 'due_date', 'due_time', 'priority', 'source', 'force_today', 'today', 'completed_at']) {
+          if (Object.prototype.hasOwnProperty.call(taskInput, key)) allowed[key] = taskInput[key];
+        }
+        const task = normalizeTask(allowed, store.tasks[index]);
+        if (task.status === 'done' && !task.completed_at) task.completed_at = nowIso();
+        store.tasks[index] = task;
+        updated.push(publicTask(task));
+      }
+    }
+    if (eventId) eventStore.push({ webhook_event_id: eventId, applied_at: nowIso() });
+    writeStore(store);
+    sendJson(res, 200, { server_time: nowIso(), event_id: eventId, duplicate: false, created, updated }); return;
   }
 
   sendJson(res, 404, { error: 'not found' });
@@ -947,15 +948,15 @@ function validateStartupConfig(configFile = CONFIG_FILE, logger = console) {
     config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
   } catch (e) {
     if (e.code === 'ENOENT') {
-      logger.warn('Config: no config.json found, /v1/usage will return fallback data');
+      logger.warn('Config: data/config.json not found, /v1/usage will return CPA-only defaults');
     } else {
       logger.warn('Config: config.json parse error:', e.message);
     }
     return;
   }
 
-  if (!config || typeof config !== 'object' || !config.opencode_api_key) {
-    logger.warn('Config: opencode_api_key is missing, /v1/usage will return fallback data');
+  if (!config || typeof config !== 'object') {
+    logger.warn('Config: config.json is empty or invalid, /v1/usage will return CPA-only defaults');
   }
 }
 

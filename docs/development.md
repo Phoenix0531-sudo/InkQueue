@@ -88,6 +88,9 @@ cd android
 - due_time 保留规则
 - 首页分组规则
 - JSON snapshot 解析
-- API health / snapshot / create / operations / token 拒绝
+- JSON API：health / snapshot / create / operations / token 拒绝
+- 操作幂等：重复 op_id 不重复改变任务时间戳
+- 服务端时间：设备时间不会覆盖 completed_at / updated_at
+- Agent Webhook：单任务、批量任务、更新和 event_id 去重
 
 SQLiteOpenHelper 需要 Android runtime。无真机或模拟器时不运行 instrumented repository 测试，改为通过代码审查和 APK 构建验证编译正确性。

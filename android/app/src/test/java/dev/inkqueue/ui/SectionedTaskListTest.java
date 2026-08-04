@@ -7,35 +7,56 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class SectionedTaskListTest {
-    @Test public void groupsOpenTasksIntoTodayWeekAndLater() {
+    @Test public void groupsOpenTasksIntoOverdueTodayWeekAndLater() {
         List<Task> tasks = new ArrayList<Task>();
-        tasks.add(task("overdue", "过期", "todo", "2026-07-05", null, false));
-        tasks.add(task("today", "今天", "todo", "2026-07-06", "14:00", false));
-        tasks.add(task("force", "强制今日", "todo", "2026-07-20", null, true));
-        tasks.add(task("week", "本周", "todo", "2026-07-10", null, false));
-        tasks.add(task("later", "以后", "todo", "2026-07-20", null, false));
-        tasks.add(task("nodate", "无日期", "todo", null, null, false));
-        tasks.add(task("done", "完成", "done", "2026-07-06", null, false));
+        tasks.add(task("overdue", "\u8FC7\u671F", "todo", "2026-07-05", null, false));
+        tasks.add(task("today", "\u4ECA\u5929", "todo", "2026-07-06", "14:00", false));
+        tasks.add(task("force", "\u5F3A\u5236\u4ECA\u65E5", "todo", "2026-07-20", null, true));
+        tasks.add(task("week", "\u672C\u5468", "todo", "2026-07-10", null, false));
+        tasks.add(task("later", "\u4EE5\u540E", "todo", "2026-07-20", null, false));
+        tasks.add(task("nodate", "\u65E0\u65E5\u671F", "todo", null, null, false));
+        tasks.add(task("done", "\u5B8C\u6210", "done", "2026-07-06", null, false));
 
         SectionedTaskList grouped = SectionedTaskList.group(tasks, "2026-07-06");
 
-        assertEquals(3, grouped.today.size());
-        assertEquals("overdue", grouped.today.get(0).id);
+        assertEquals(1, grouped.overdue.size());
+        assertEquals("overdue", grouped.overdue.get(0).id);
+
+        assertEquals(2, grouped.today.size());
+        assertEquals("today", grouped.today.get(0).id);
+        assertEquals("force", grouped.today.get(1).id);
+
         assertEquals(1, grouped.week.size());
         assertEquals("week", grouped.week.get(0).id);
+
         assertEquals(2, grouped.later.size());
         assertEquals("later", grouped.later.get(0).id);
         assertEquals("nodate", grouped.later.get(1).id);
     }
 
-    @Test public void emptyTodayAddsQuietEmptyRow() {
+    @Test public void emptyTodayWithWeekTasksShowsDoneMessage() {
         List<Task> tasks = new ArrayList<Task>();
-        tasks.add(task("week", "本周", "todo", "2026-07-10", null, false));
-        List<SectionedTaskList.Row> rows = SectionedTaskList.group(tasks, "2026-07-06").toRows("2026-07-06");
+        tasks.add(task("week", "\u672C\u5468", "todo", "2026-07-10", null, false));
+        List<SectionedTaskList.Row> rows = SectionedTaskList.group(tasks, "2026-07-06").pageRows(SectionedTaskList.PAGE_TODAY, "2026-07-06");
         assertEquals(SectionedTaskList.Row.TYPE_SECTION, rows.get(0).type);
-        assertEquals("// TODAY", rows.get(0).text);
+        assertEquals("\u4ECA\u65E5", rows.get(0).text);
         assertEquals(SectionedTaskList.Row.TYPE_EMPTY, rows.get(1).type);
-        assertTrue(rows.get(1).text.contains("no tasks for today"));
+        assertTrue(rows.get(1).text.contains("\u4ECA\u5929\u7684\u4E8B\u505A\u5B8C\u4E86"));
+    }
+
+    @Test public void fullyEmptyShowsAgentMessage() {
+        List<Task> tasks = new ArrayList<Task>();
+        List<SectionedTaskList.Row> rows = SectionedTaskList.group(tasks, "2026-07-06").pageRows(SectionedTaskList.PAGE_TODAY, "2026-07-06");
+        assertEquals(SectionedTaskList.Row.TYPE_EMPTY, rows.get(1).type);
+        assertTrue(rows.get(1).text.contains("\u4EFB\u52A1\u4F1A\u7531 Agent"));
+    }
+
+    @Test public void overdueTasksGoToOverduePage() {
+        List<Task> tasks = new ArrayList<Task>();
+        tasks.add(task("overdue", "\u8FC7\u671F", "todo", "2026-07-05", null, false));
+        SectionedTaskList grouped = SectionedTaskList.group(tasks, "2026-07-06");
+        assertEquals(1, grouped.overdue.size());
+        assertEquals(0, grouped.today.size());
     }
 
     @Test public void malformedDueDateFallsBackToLater() {

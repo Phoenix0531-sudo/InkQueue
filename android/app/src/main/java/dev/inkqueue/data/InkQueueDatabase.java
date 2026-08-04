@@ -4,11 +4,46 @@ import android.content.Context;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 
+/**
+ * Single SQLiteOpenHelper for the whole process.
+ *
+ * Android 4.4 logs "SQLiteConnection … was leaked" when multiple helpers for the
+ * same file are abandoned without close(). MainActivity, TaskDetailActivity and
+ * every SyncService used to each construct a fresh helper → pool leak on every
+ * sync. Keep one instance keyed on application context.
+ */
 public class InkQueueDatabase extends SQLiteOpenHelper {
     public static final String DB_NAME = "inkqueue.db";
-    public static final int DB_VERSION = 2;
+    public static final int DB_VERSION = 3;
 
-    public InkQueueDatabase(Context context) {
+    private static final Object LOCK = new Object();
+    private static InkQueueDatabase instance;
+
+    public static InkQueueDatabase getInstance(Context context) {
+        if (instance == null) {
+            synchronized (LOCK) {
+                if (instance == null) {
+                    instance = new InkQueueDatabase(context.getApplicationContext());
+                }
+            }
+        }
+        return instance;
+    }
+
+    /** Visible for unit tests that need an isolated helper. */
+    public static void resetInstanceForTests() {
+        synchronized (LOCK) {
+            if (instance != null) {
+                try {
+                    instance.close();
+                } catch (Throwable ignored) {
+                }
+                instance = null;
+            }
+        }
+    }
+
+    private InkQueueDatabase(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
     }
 
@@ -21,6 +56,7 @@ public class InkQueueDatabase extends SQLiteOpenHelper {
                 "status TEXT NOT NULL," +
                 "due_date TEXT," +
                 "due_time TEXT," +
+                "project TEXT," +
                 "priority TEXT," +
                 "created_at TEXT," +
                 "updated_at TEXT," +
@@ -52,5 +88,12 @@ public class InkQueueDatabase extends SQLiteOpenHelper {
         db.execSQL("DROP TABLE IF EXISTS pending_operations");
         db.execSQL("DROP TABLE IF EXISTS sync_state");
         onCreate(db);
+    }
+
+    @Override
+    public void onConfigure(SQLiteDatabase db) {
+        // Keep foreign-key-ish integrity optional; enable WAL only if API supports and
+        // device is happy — skip on KitKat for maximum compatibility.
+        super.onConfigure(db);
     }
 }

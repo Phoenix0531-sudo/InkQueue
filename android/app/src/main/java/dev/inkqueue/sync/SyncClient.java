@@ -2,7 +2,6 @@ package dev.inkqueue.sync;
 
 import android.util.Log;
 import dev.inkqueue.data.PendingOperation;
-import dev.inkqueue.data.UsageProvider;
 import dev.inkqueue.util.DateUtils;
 import dev.inkqueue.util.JsonUtils;
 import java.io.BufferedReader;
@@ -36,49 +35,35 @@ public class SyncClient {
     public String getBaseUrl() {
         return baseUrl == null ? "" : baseUrl;
     }
-    public List<UsageProvider> fetchUsage() {
-        HttpURLConnection conn = null;
-        try {
-            // force=1: skip server short cache so SYNC always refreshes account pool counts
-            conn = open("/v1/usage?force=1", "GET");
-            int code = conn.getResponseCode();
-            if (code != 200) return new java.util.ArrayList<UsageProvider>();
-            String body = readResponse(conn, code);
-            return UsageProvider.parseList(body);
-        } catch (Exception e) {
-            Log.w(TAG, "fetch usage failed", e);
-            return new java.util.ArrayList<UsageProvider>();
-        } finally {
-            if (conn != null) conn.disconnect();
-        }
-    }
 
     public SyncResult fetchSnapshot() {
-        if (DateUtils.isEmpty(baseUrl)) return SyncResult.fail("sync not configured.", "missing base url");
+        if (DateUtils.isEmpty(baseUrl)) return SyncResult.fail("尚未配置同步地址。", "missing base url");
         HttpURLConnection conn = null;
         try {
+            Log.i(TAG, "GET " + baseUrl + "/v1/tasks/snapshot");
             conn = open("/v1/tasks/snapshot", "GET");
             int code = conn.getResponseCode();
+            Log.i(TAG, "snapshot response code=" + code);
             String body = readResponse(conn, code);
-            if (code == 401) return SyncResult.fail("token rejected. check settings.", body);
-            if (code < 200 || code >= 300) return SyncResult.fail("server unavailable.", body);
+            if (code == 401) return SyncResult.fail("同步被拒绝，请检查 Token。", body);
+            if (code < 200 || code >= 300) return SyncResult.fail("服务器暂时不可用。", body);
             JsonUtils.Snapshot snapshot = JsonUtils.parseSnapshot(body);
-            SyncResult result = SyncResult.ok("synced");
+            SyncResult result = SyncResult.ok("已同步");
             result.httpStatus = code;
             result.serverTime = snapshot.serverTime;
             result.tasks = snapshot.tasks;
             return result;
         } catch (Exception e) {
             Log.w(TAG, "fetch snapshot failed", e);
-            return SyncResult.fail("sync failed. showing local data.", e.toString());
+            return SyncResult.fail("同步失败，显示本地内容", e.toString());
         } finally {
             if (conn != null) conn.disconnect();
         }
     }
 
     public SyncResult postOperations(String deviceId, List<PendingOperation> operations) {
-        if (operations == null || operations.isEmpty()) return SyncResult.ok("no pending ops");
-        if (DateUtils.isEmpty(baseUrl)) return SyncResult.fail("sync not configured.", "missing base url");
+        if (operations == null || operations.isEmpty()) return SyncResult.ok("无待同步操作");
+        if (DateUtils.isEmpty(baseUrl)) return SyncResult.fail("尚未配置同步地址。", "missing base url");
         HttpURLConnection conn = null;
         try {
             JSONObject root = new JSONObject();
@@ -88,18 +73,20 @@ public class SyncClient {
             root.put("operations", array);
 
             conn = open("/v1/tasks/operations", "POST");
+            Log.i(TAG, "POST " + baseUrl + "/v1/tasks/operations ops=" + operations.size());
             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(conn.getOutputStream(), "UTF-8"));
             writer.write(root.toString());
             writer.flush();
             writer.close();
 
             int code = conn.getResponseCode();
+            Log.i(TAG, "operations response code=" + code);
             String body = readResponse(conn, code);
-            if (code == 401) return SyncResult.fail("token rejected. check settings.", body);
-            if (code < 200 || code >= 300) return SyncResult.fail("server unavailable.", body);
+            if (code == 401) return SyncResult.fail("同步被拒绝，请检查 Token。", body);
+            if (code < 200 || code >= 300) return SyncResult.fail("服务器暂时不可用。", body);
 
             JSONObject json = new JSONObject(body);
-            SyncResult result = SyncResult.ok("ops synced");
+            SyncResult result = SyncResult.ok("已同步");
             result.httpStatus = code;
             result.serverTime = json.optString("server_time", null);
             readStringArray(json.optJSONArray("accepted"), result.accepted);
@@ -111,14 +98,16 @@ public class SyncClient {
                     if (error == null) {
                         result.errors.add(errors.opt(i).toString());
                     } else {
-                        result.errors.add(error.optString("id", "") + "\t" + error.optString("error", "operation failed"));
+                        result.errors.add(error.optString("id", "") + "\t" + error.optString("error", "操作失败"));
                     }
                 }
             }
             return result;
         } catch (Exception e) {
             Log.w(TAG, "post operations failed", e);
-            return SyncResult.fail("saved. will sync when online.", e.toString());
+            // Technical path for SyncService — user-facing copy is chosen there
+            // (manual sync → "同步失败…"; detail-page offline toast is separate).
+            return SyncResult.fail("同步失败，显示本地内容", e.toString());
         } finally {
             if (conn != null) conn.disconnect();
         }

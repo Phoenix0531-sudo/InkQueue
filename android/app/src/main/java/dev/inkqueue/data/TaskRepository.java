@@ -8,17 +8,52 @@ import dev.inkqueue.util.DateUtils;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Local task + pending-op store. Uses the process-wide {@link InkQueueDatabase}
+ * singleton so concurrent SyncService / Activity paths share one connection pool.
+ */
 public class TaskRepository {
     private static final String LAST_SYNC_KEY = "last_sync_time";
+    private static final String LAST_SYNC_ERROR_KEY = "last_sync_error";
+    private static final String LAST_SYNC_ATTEMPT_KEY = "last_sync_attempt";
+
+    private static final Object LOCK = new Object();
+    private static TaskRepository instance;
+
     private final InkQueueDatabase helper;
 
+    public static TaskRepository getInstance(Context context) {
+        if (instance == null) {
+            synchronized (LOCK) {
+                if (instance == null) {
+                    instance = new TaskRepository(context.getApplicationContext());
+                }
+            }
+        }
+        return instance;
+    }
+
+    /** Prefer {@link #getInstance(Context)}. Kept for call-site compatibility. */
     public TaskRepository(Context context) {
-        this.helper = new InkQueueDatabase(context.getApplicationContext());
+        this.helper = InkQueueDatabase.getInstance(context);
+    }
+
+    /** Test-only: drop singleton so the next getInstance rebuilds against a clean helper. */
+    public static void resetInstanceForTests() {
+        synchronized (LOCK) {
+            instance = null;
+            InkQueueDatabase.resetInstanceForTests();
+        }
     }
 
     public List<Task> getAllOpenTasks() {
         SQLiteDatabase db = helper.getReadableDatabase();
-        Cursor cursor = db.query("tasks", null, "status NOT IN (?, ?)", new String[]{Task.STATUS_DONE, Task.STATUS_ARCHIVED}, null, null, "due_date IS NULL, due_date ASC, due_time IS NULL, due_time ASC, title ASC");
+        Cursor cursor = db.query(
+                "tasks", null,
+                "status NOT IN (?, ?)",
+                new String[]{Task.STATUS_DONE, Task.STATUS_ARCHIVED},
+                null, null,
+                "due_date IS NULL, due_date ASC, due_time IS NULL, due_time ASC, title ASC");
         try {
             List<Task> out = new ArrayList<Task>();
             while (cursor.moveToNext()) out.add(taskFromCursor(cursor));
@@ -42,7 +77,9 @@ public class TaskRepository {
         SQLiteDatabase db = helper.getWritableDatabase();
         db.beginTransaction();
         try {
-            for (Task task : tasks) db.insertWithOnConflict("tasks", null, valuesForTask(task), SQLiteDatabase.CONFLICT_REPLACE);
+            for (Task task : tasks) {
+                db.insertWithOnConflict("tasks", null, valuesForTask(task), SQLiteDatabase.CONFLICT_REPLACE);
+            }
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
@@ -54,7 +91,9 @@ public class TaskRepository {
         db.beginTransaction();
         try {
             db.delete("tasks", null, null);
-            for (Task task : tasks) db.insertWithOnConflict("tasks", null, valuesForTask(task), SQLiteDatabase.CONFLICT_REPLACE);
+            for (Task task : tasks) {
+                db.insertWithOnConflict("tasks", null, valuesForTask(task), SQLiteDatabase.CONFLICT_REPLACE);
+            }
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
@@ -146,6 +185,24 @@ public class TaskRepository {
         }
     }
 
+    /** Cheap count for masthead "待同步 N 条". */
+    public int countPendingOperations() {
+        return countPendingOperations(Integer.MAX_VALUE);
+    }
+
+    public int countPendingOperations(int maxRetry) {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        Cursor cursor = db.rawQuery(
+                "SELECT COUNT(*) FROM pending_operations WHERE retry_count < ?",
+                new String[]{String.valueOf(maxRetry)});
+        try {
+            if (cursor.moveToFirst()) return cursor.getInt(0);
+            return 0;
+        } finally {
+            cursor.close();
+        }
+    }
+
     public PendingOperation getPendingOperation(String id) {
         SQLiteDatabase db = helper.getReadableDatabase();
         Cursor cursor = db.query("pending_operations", null, "id=?", new String[]{id}, null, null, null);
@@ -175,8 +232,36 @@ public class TaskRepository {
     }
 
     public String getLastSyncTime() {
+        return getSyncState(LAST_SYNC_KEY);
+    }
+
+    public void setLastSyncTime(String time) {
+        putSyncState(LAST_SYNC_KEY, time);
+    }
+
+    public String getLastSyncError() {
+        return getSyncState(LAST_SYNC_ERROR_KEY);
+    }
+
+    public void setLastSyncError(String error) {
+        putSyncState(LAST_SYNC_ERROR_KEY, error == null ? "" : error);
+    }
+
+    public void clearLastSyncError() {
+        putSyncState(LAST_SYNC_ERROR_KEY, "");
+    }
+
+    public String getLastSyncAttempt() {
+        return getSyncState(LAST_SYNC_ATTEMPT_KEY);
+    }
+
+    public void setLastSyncAttempt(String isoTime) {
+        putSyncState(LAST_SYNC_ATTEMPT_KEY, isoTime);
+    }
+
+    private String getSyncState(String key) {
         SQLiteDatabase db = helper.getReadableDatabase();
-        Cursor cursor = db.query("sync_state", new String[]{"value"}, "key=?", new String[]{LAST_SYNC_KEY}, null, null, null);
+        Cursor cursor = db.query("sync_state", new String[]{"value"}, "key=?", new String[]{key}, null, null, null);
         try {
             return cursor.moveToFirst() ? cursor.getString(0) : null;
         } finally {
@@ -184,10 +269,10 @@ public class TaskRepository {
         }
     }
 
-    public void setLastSyncTime(String time) {
+    private void putSyncState(String key, String value) {
         ContentValues values = new ContentValues();
-        values.put("key", LAST_SYNC_KEY);
-        values.put("value", time);
+        values.put("key", key);
+        values.put("value", value);
         helper.getWritableDatabase().insertWithOnConflict("sync_state", null, values, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
@@ -199,6 +284,7 @@ public class TaskRepository {
         values.put("status", task.status);
         values.put("due_date", task.dueDate);
         values.put("due_time", task.dueTime);
+        values.put("project", task.project);
         values.put("priority", task.priority);
         values.put("created_at", task.createdAt);
         values.put("updated_at", task.updatedAt);
@@ -217,6 +303,7 @@ public class TaskRepository {
         task.status = cursor.getString(cursor.getColumnIndexOrThrow("status"));
         task.dueDate = cursor.getString(cursor.getColumnIndexOrThrow("due_date"));
         task.dueTime = cursor.getString(cursor.getColumnIndexOrThrow("due_time"));
+        task.project = cursor.getString(cursor.getColumnIndexOrThrow("project"));
         task.priority = cursor.getString(cursor.getColumnIndexOrThrow("priority"));
         task.createdAt = cursor.getString(cursor.getColumnIndexOrThrow("created_at"));
         task.updatedAt = cursor.getString(cursor.getColumnIndexOrThrow("updated_at"));

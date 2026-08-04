@@ -9,7 +9,9 @@
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
     "ctl": "node ../scripts/server-ctl.js",
-    "seed": "node ../scripts/seed-sample-tasks.js"
+    "seed": "node ../scripts/seed-sample-tasks.js",
+    "inkq": "node ../agent/inkq.js",
+    "inkq-smoke": "node ../agent/test-inkq-smoke.js"
   },
   "engines": {
     "node": ">=18"
@@ -18,7 +20,6 @@
     "bonjour": "^3.5.0"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
     "global-agent": "^4.1.3",
     "https-proxy-agent": "^9.1.0",
     "socks-proxy-agent": "^10.1.0"
