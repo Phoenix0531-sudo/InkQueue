@@ -9,13 +9,15 @@
  *
  * Protocol: MCP over stdio, newline-delimited JSON-RPC 2.0
  *   (matches official Python mcp SDK used by Hermes; NOT Content-Length)
- *   tools: health, context, list, get, add, patch, events
+ *   tools: health, context, list, get, add, patch, events, triage
  *   add/patch accept optional audit fields: why, source_session (agent self-report)
+ *   triage shares lib/triage-runner.js with inkq CLI (identical planner)
  */
 
 const path = require('path');
 // agent/adapters/mcp-inkqueue → agent/lib/client.js
 const client = require(path.join(__dirname, '..', '..', 'lib', 'client.js'));
+const triageRunner = require(path.join(__dirname, '..', '..', 'lib', 'triage-runner.js'));
 const {
   buildConfig,
   health: apiHealth,
@@ -162,6 +164,35 @@ const TOOLS = [
       properties: {
         since: { type: 'string', description: 'ISO8601 lower bound' },
         limit: { type: 'number', description: 'max events (tail)' },
+        base_url: { type: 'string' },
+        auth: { type: 'string' }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'triage',
+    description:
+      'Bulk-rearrange today+chronic tasks via the same planner as `inkq patch triage`. ' +
+      'Loads context + events + snapshot, plans, optionally applies patches. ' +
+      'Chronic tasks are NEVER auto-deferred without force_chronic=true (asks user instead).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        today_cap: {
+          type: 'number',
+          description: 'max tasks to keep today before deferring overflow (default 5)'
+        },
+        apply: {
+          type: 'boolean',
+          description: 'dry-run by default; set true to actually patch due_date'
+        },
+        force_chronic: {
+          type: 'boolean',
+          description: 'defer chronic_late to next Monday even though human should decide (defaults false; chronic stays ask_user)'
+        },
+        why: { type: 'string', description: 'audit note when applying patches' },
+        source_session: { type: 'string', description: 'audit: originating agent session id' },
         base_url: { type: 'string' },
         auth: { type: 'string' }
       },
@@ -368,6 +399,29 @@ async function callTool(name, args) {
     });
   }
 
+  if (name === 'triage') {
+    const result = await triageRunner.runTriage(cfg, {
+      cap: args.today_cap,
+      apply: args.apply,
+      forceChronic: args.force_chronic,
+      why: args.why,
+      source_session: args.source_session
+    });
+    if (!result.ok) {
+      return textResult(
+        { ok: false, error: result.error, status: result.status, detail: result.detail },
+        true
+      );
+    }
+    return textResult({
+      ok: true,
+      dry_run: result.dryRun,
+      triage: result.plan,
+      results: result.results || null,
+      hint: result.hint
+    });
+  }
+
   return textResult({ ok: false, error: 'unknown_tool', name }, true);
 }
 
@@ -507,4 +561,4 @@ process.stdin.on('end', () => {
 process.stdin.resume();
 
 // Never write non-protocol noise to stdout.
-process.stderr.write('mcp-inkqueue ready (stdio, tools: health/context/list/get/add/patch/events)\n');
+process.stderr.write('mcp-inkqueue ready (stdio, tools: health/context/list/get/add/patch/events/triage)\n');
