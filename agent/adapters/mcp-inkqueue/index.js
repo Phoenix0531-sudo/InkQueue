@@ -10,6 +10,7 @@
  * Protocol: MCP over stdio, newline-delimited JSON-RPC 2.0
  *   (matches official Python mcp SDK used by Hermes; NOT Content-Length)
  *   tools: health, context, list, get, add, patch, events
+ *   add/patch accept optional audit fields: why, source_session (agent self-report)
  */
 
 const path = require('path');
@@ -108,6 +109,14 @@ const TOOLS = [
         priority: { type: 'string', description: 'normal | high' },
         status: { type: 'string' },
         source: { type: 'string' },
+        why: {
+          type: 'string',
+          description: 'Optional audit note: why this task was created (agent self-report, not chat-scan)'
+        },
+        source_session: {
+          type: 'string',
+          description: 'Optional audit: originating agent session id (agent self-report)'
+        },
         base_url: { type: 'string' },
         auth: { type: 'string' }
       },
@@ -129,6 +138,14 @@ const TOOLS = [
         priority: { type: 'string' },
         status: { type: 'string' },
         source: { type: 'string' },
+        why: {
+          type: 'string',
+          description: 'Optional audit note: why this patch was made (agent self-report)'
+        },
+        source_session: {
+          type: 'string',
+          description: 'Optional audit: originating agent session id (agent self-report)'
+        },
         base_url: { type: 'string' },
         auth: { type: 'string' }
       },
@@ -277,6 +294,8 @@ async function callTool(name, args) {
     if (args.time !== undefined) body.due_time = args.time;
     if (args.priority !== undefined) body.priority = args.priority;
     if (args.status !== undefined) body.status = args.status;
+    if (args.why !== undefined) body.why = args.why;
+    if (args.source_session !== undefined) body.source_session = args.source_session;
 
     const res = await apiCreateTask(cfg, body);
     if (res.status === 401 || res.status === 403) {
@@ -301,6 +320,8 @@ async function callTool(name, args) {
     if (args.priority !== undefined) body.priority = args.priority;
     if (args.status !== undefined) body.status = args.status;
     if (args.source !== undefined) body.source = args.source;
+    if (args.why !== undefined) body.why = args.why;
+    if (args.source_session !== undefined) body.source_session = args.source_session;
     if (Object.keys(body).length === 0) {
       return textResult({ ok: false, error: 'nothing_to_patch' }, true);
     }
@@ -367,6 +388,8 @@ function sendError(id, code, message, data) {
   writeMessage({ jsonrpc: '2.0', id, error: err });
 }
 
+let inflight = 0;
+
 async function handleRpc(msg) {
   if (!msg || typeof msg !== 'object') return;
   // notifications have no id
@@ -382,49 +405,54 @@ async function handleRpc(msg) {
     return;
   }
 
-  if (method === 'initialize') {
-    sendResult(id, {
-      protocolVersion: (params && params.protocolVersion) || '2024-11-05',
-      capabilities: { tools: {} },
-      serverInfo: SERVER_INFO
-    });
-    return;
-  }
-
-  if (method === 'ping') {
-    sendResult(id, {});
-    return;
-  }
-
-  if (method === 'tools/list') {
-    sendResult(id, { tools: TOOLS });
-    return;
-  }
-
-  if (method === 'tools/call') {
-    const name = params && params.name;
-    const args = (params && params.arguments) || {};
-    if (!name) {
-      sendError(id, -32602, 'Missing tool name');
+  inflight++;
+  try {
+    if (method === 'initialize') {
+      sendResult(id, {
+        protocolVersion: (params && params.protocolVersion) || '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: SERVER_INFO
+      });
       return;
     }
-    try {
-      const result = await callTool(name, args);
-      sendResult(id, result);
-    } catch (err) {
-      sendResult(
-        id,
-        textResult(
-          {
-            ok: false,
-            error: 'request_error',
-            message: err && err.message ? err.message : String(err)
-          },
-          true
-        )
-      );
+
+    if (method === 'ping') {
+      sendResult(id, {});
+      return;
     }
-    return;
+
+    if (method === 'tools/list') {
+      sendResult(id, { tools: TOOLS });
+      return;
+    }
+
+    if (method === 'tools/call') {
+      const name = params && params.name;
+      const args = (params && params.arguments) || {};
+      if (!name) {
+        sendError(id, -32602, 'Missing tool name');
+        return;
+      }
+      try {
+        const result = await callTool(name, args);
+        sendResult(id, result);
+      } catch (err) {
+        sendError(
+          id,
+          textResult(
+            {
+              ok: false,
+              error: 'request_error',
+              message: err && err.message ? err.message : String(err)
+            },
+            true
+          )
+        );
+      }
+      return;
+    }
+  } finally {
+    inflight--;
   }
 
   if (isNotif) return;
@@ -468,7 +496,14 @@ process.stdin.on('data', (chunk) => {
   tryConsumeLines();
 });
 
-process.stdin.on('end', () => process.exit(0));
+process.stdin.on('end', () => {
+  // Wait for in-flight RPC handlers (async tools/call) before exiting,
+  // otherwise stdout never flushes and callers see no result.
+  if (inflight === 0) process.exit(0);
+  const iv = setInterval(() => {
+    if (inflight === 0) { clearInterval(iv); process.exit(0); }
+  }, 10);
+});
 process.stdin.resume();
 
 // Never write non-protocol noise to stdout.
