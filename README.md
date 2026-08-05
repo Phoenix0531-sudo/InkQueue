@@ -431,7 +431,48 @@ v0.7 没有触及 SettingsActivity——它还是 v0.5 时代的 ScrollView + Li
 
 ---
 
-## Known limitations (v0.9.0)
+
+### Outbound webhook (device → Agent)
+
+When Kindle uploads `complete` / `postpone`, the server POSTs a fire-and-forget envelope to:
+
+- env `INKQUEUE_AGENT_WEBHOOK_URL`, or
+- `agent_webhook_url` in `server/data/config.json`
+
+Envelope shape:
+
+```json
+{
+  "schema": "inkqueue.device_event.v1",
+  "server_time": "2026-08-05T09:00:00+08:00",
+  "event": {
+    "event_id": "op_…",
+    "type": "complete",
+    "task_id": "task_…",
+    "task_title": "…",
+    "occurred_at": "…",
+    "payload": {}
+  },
+  "signal": {
+    "kind": "task_completed",
+    "task_id": "task_…",
+    "title": "…",
+    "at": "…",
+    "advice": "可提后续；勿重复 add 同意图"
+  }
+}
+```
+
+Local sink for testing:
+
+```bash
+node scripts/webhook-echo.js
+# then set agent_webhook_url to the printed URL and complete a task
+```
+
+Agent can still poll `GET /v1/events` / `inkq events`; webhook is the reverse real-time path.
+
+## Known limitations (v0.9.1)
 
 - No push notifications — sync is pull-only on app open or manual tap.
 - No multi-user / auth system — single `X-InkQueue-Token` shared between Agent and device.
@@ -465,6 +506,12 @@ v0.7 没有触及 SettingsActivity——它还是 v0.5 时代的 ScrollView + Li
 ### Future (separate projects, not InkQueue core)
 - Daily briefing app / RSS / career radar / WeChat Reading sidecar
 
+### Shipped (v0.9.1 protocol deepen)
+- Conflict v2: agent text vs device lifecycle field ownership; client preserves pending local status/due on snapshot
+- Commitment fields: optional `why` / `source_session` on add
+- `inkq triage [--apply] [--today-cap N]` bulk rearrange
+- Outbound webhook envelope `inkqueue.device_event.v1` (HTTPS-capable)
+
 ### Shipped (v0.9.0 experience pass)
 - Partial list reflow + checkbox flash on complete/postpone (less full-screen flash)
 - Tab **已做** — today’s completed archive
@@ -475,8 +522,6 @@ v0.7 没有触及 SettingsActivity——它还是 v0.5 时代的 ScrollView + Li
 ### Later candidates (same product)
 - Vendor e-ink partial refresh API if available on KOSP
 - Optional MCP wrapper around `inkq` (shipped thin; keep optional)
-- Richer conflict policy when Agent edits a task that still has a pending device op
-- `inkq triage` bulk rearrange
 
 ---
 

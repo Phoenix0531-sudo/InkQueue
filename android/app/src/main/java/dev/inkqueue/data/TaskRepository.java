@@ -6,7 +6,11 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import dev.inkqueue.util.DateUtils;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Local task + pending-op store. Uses the process-wide {@link InkQueueDatabase}
@@ -111,13 +115,66 @@ public class TaskRepository {
         }
     }
 
+    /**
+     * Merge云端 snapshot 进本地，保护尚未上传的 pending operations。
+     *
+     * 冲突策略 v2（conflict_policy = agent_text_device_lifecycle）：
+     *   - 没有 pending op 的 task：直接用 snapshot 覆盖（delete + insert）。
+     *   - 有 pending op 的 task：snapshot 的 title/note/project/priority/source/created_at/raw_json
+     *     采用云端值；本地 status/due_date/due_time/completed_at/updated_at 保留
+     *     （设备刚做完但 server 还没收到）。
+     *
+     * 这避免 Agent 改标题时把设备刚完成的 status 冲掉。
+     */
     public void replaceTasksWithSnapshot(List<Task> tasks) {
+        Set<String> pendingTaskIds = new HashSet<String>();
+        for (PendingOperation op : getPendingOperations()) {
+            if (op.taskId != null) pendingTaskIds.add(op.taskId);
+        }
+
         SQLiteDatabase db = helper.getWritableDatabase();
         db.beginTransaction();
         try {
+            // Collect local lifecycle fields for tasks with pending ops before wipe.
+            Map<String, String[]> localLifecycle = new HashMap<String, String[]>();
+            if (!pendingTaskIds.isEmpty()) {
+                StringBuilder placeholders = new StringBuilder();
+                boolean first = true;
+                for (String id : pendingTaskIds) {
+                    if (!first) placeholders.append(',');
+                    placeholders.append('?');
+                    first = false;
+                }
+                Cursor c = db.query(
+                        "tasks",
+                        new String[]{"id", "status", "due_date", "due_time", "completed_at", "updated_at"},
+                        "id IN (" + placeholders.toString() + ")",
+                        pendingTaskIds.toArray(new String[0]),
+                        null, null, null);
+                try {
+                    while (c.moveToNext()) {
+                        localLifecycle.put(c.getString(0), new String[]{
+                                c.getString(1), c.getString(2), c.getString(3),
+                                c.getString(4), c.getString(5)});
+                    }
+                } finally {
+                    c.close();
+                }
+            }
+
             db.delete("tasks", null, null);
             for (Task task : tasks) {
-                db.insertWithOnConflict("tasks", null, valuesForTask(task), SQLiteDatabase.CONFLICT_REPLACE);
+                String[] local = localLifecycle.get(task.id);
+                ContentValues v = valuesForTask(task);
+                if (local != null) {
+                    // pending op: protect device lifecycle fields
+                    v.put("status", local[0] != null ? local[0] : task.status);
+                    v.put("due_date", local[1] != null ? local[1] : task.dueDate);
+                    v.put("due_time", local[2] != null ? local[2] : task.dueTime);
+                    v.put("completed_at", local[3] != null ? local[3] : task.completedAt);
+                    v.put("updated_at", local[4] != null ? local[4] : task.updatedAt);
+                }
+                db.insertWithOnConflict("tasks", null, v, SQLiteDatabase.CONFLICT_REPLACE);
             }
             db.setTransactionSuccessful();
         } finally {

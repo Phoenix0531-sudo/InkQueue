@@ -18,6 +18,10 @@ server/data/server.log
 # local runtime
 server/data/tmp/
 server/data/preferred-port.txt
+server/data/autostart-server.cmd
+
+# local screenshots (probe artifacts)
+docs/screenshots/
 server/data/_usage_last.json
 server/data/agent-config.json
 agent/config.json

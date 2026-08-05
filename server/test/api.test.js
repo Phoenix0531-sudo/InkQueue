@@ -561,11 +561,15 @@ test('P8 outbound agent webhook fires on complete operation when configured', as
       await new Promise((r) => setTimeout(r, 50));
     }
     assert.equal(received.length, 1, `echo server should receive 1 webhook, got ${received.length}`);
-    const event = JSON.parse(received[0].body);
+    const envelope = JSON.parse(received[0].body);
+    assert.equal(envelope.schema, 'inkqueue.device_event.v1');
+    const event = envelope.event;
     assert.equal(event.type, 'complete');
     assert.equal(event.task_id, task.id);
     assert.equal(event.task_title, 'webhook probe');
-    assert.match(event.occurred_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/);
+    assert.match(event.occurred_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+\d{2}:\d{2}$/);
+    assert.equal(envelope.signal.kind, 'task_completed');
+    assert.equal(envelope.signal.task_id, task.id);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await new Promise((resolve) => echo.close(resolve));

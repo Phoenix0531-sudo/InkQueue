@@ -22,7 +22,15 @@ node agent/inkq.js <command> ...
 | `get <id>` | 单条 |
 | `add --title ...` | 新建（`source` 默认 agent） |
 | `patch <id> ...` | 改字段 |
+| `patch triage [--apply]` | 整理今日过载 + chronic_postpone（dry-run 看建议，`--apply` 真改） |
 | `events` | Kindle 完成/推迟等事件 |
+
+`patch` / `add` 可带审计字段：
+
+- `--why "<短理由>"` — 这条任务/改动为何产生（人侧可读，不显示在 Kindle 首页）
+- `--source-session "<session_id>"` — 产生此改动的 Agent 会话 id，便于回溯
+
+这俩字段由 Agent 自报，**不**自动扫聊天；写进 server 但 Kindle v0.1 不依赖。
 
 `due` 可用：`today` / `tomorrow` / `YYYY-MM-DD`。  
 产品时区固定 **Asia/Shanghai (+08:00)**。
@@ -75,6 +83,19 @@ node agent/inkq.js context   # 附带 chronic_postpone[] + rules
 `context` 在可用时会附带 `chronic_postpone` 列表；看到后**禁止**对该 id 只改 due。
 
 `events` 响应同时含 raw `events` 与派生 `signals`（`task_completed` / `postponed` / `chronic_postpone`）。优先看 `signals` 再决定是否 add/改 due；`chronic_postpone` 出现时禁止无脑再 postpone。
+
+### triage（整理助手）
+
+```bash
+node agent/inkq.js patch triage            # dry-run: 看建议
+node agent/inkq.js patch triage --apply    # 真改
+node agent/inkq.js patch triage --cap 4    # 自定义今日上限（默认 5）
+```
+
+- 读 `context` + `chronic_postpone` 信号。
+- 今日 open 超过 cap（默认 5）：溢出部分推迟到本周六（保留 due_time）。
+- chronic_postpone 任务：建议推迟到下周一（`--apply` 时带 `force`）。今日有压力时改为「问用户是否取消」。
+- dry-run 只输出 plan，不真改；`--apply` 才 patch。
 
 ## 对用户怎么说话
 

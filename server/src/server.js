@@ -521,11 +521,17 @@ function normalizeTask(input, existing) {
     status: input.status || base.status || 'todo',
     due_date: input.due_date !== undefined ? nullableString(input.due_date) : nullableString(base.due_date),
     due_time: input.due_time !== undefined ? nullableString(input.due_time) : nullableString(base.due_time),
+    project: input.project !== undefined ? nullableString(input.project) : nullableString(base.project),
     priority: input.priority || base.priority || 'normal',
     created_at: base.created_at || input.created_at || now,
     updated_at: now,
     completed_at: input.completed_at !== undefined ? nullableString(input.completed_at) : nullableString(base.completed_at),
     source: input.source || base.source || 'agent',
+    // Commitment / audit (optional, agent-reported — never scraped from chat)
+    why: input.why !== undefined ? nullableString(input.why) : nullableString(base.why),
+    source_session: input.source_session !== undefined
+      ? nullableString(input.source_session)
+      : nullableString(base.source_session),
     force_today: resolveForceToday(input, base)
   };
 }
@@ -564,10 +570,16 @@ function validateTaskInput(input, requireTitle) {
 function publicTask(task) {
   const out = { ...task };
   if (!out.force_today) delete out.force_today;
+  if (out.why == null) delete out.why;
+  if (out.source_session == null) delete out.source_session;
+  if (out.project == null) delete out.project;
   return out;
 }
 
 function applyComplete(task, op, serverTime) {
+  // Conflict v2 field ownership:
+  //   device lifecycle → status / completed_at / updated_at only
+  //   agent text       → title / note / why / source_session / project never touched here
   task.status = 'done';
   // The reference server owns mutation timestamps. Device timestamps are hints only.
   task.completed_at = serverTime;
@@ -575,10 +587,13 @@ function applyComplete(task, op, serverTime) {
 }
 
 function applyPostpone(task, op, serverTime) {
+  // Conflict v2: device owns due_date / due_time only; never rewrite agent title/note/why.
   const payload = op.payload || {};
   if (!payload.due_date) throw new Error('postpone requires payload.due_date');
   if (!isValidDate(String(payload.due_date))) throw new Error('invalid due_date');
   if (Object.prototype.hasOwnProperty.call(payload, 'due_time') && payload.due_time !== null && payload.due_time !== '' && !isValidTime(String(payload.due_time))) throw new Error('invalid due_time');
+  // Capture previous due for events/signals (Agent-readable)
+  if (!payload.from_due_date && task.due_date) payload.from_due_date = task.due_date;
   task.due_date = String(payload.due_date);
   if (Object.prototype.hasOwnProperty.call(payload, 'due_time')) task.due_time = nullableString(payload.due_time);
   task.updated_at = serverTime;
@@ -749,17 +764,66 @@ function notifyAgentWebhook(event) {
   if (!url) return;
   setImmediate(() => {
     try {
-      const body = JSON.stringify(event);
-      const req = http.request(url, {
+      let target;
+      try { target = new URL(url); } catch (e) {
+        console.warn('[webhook] invalid agent_webhook_url');
+        return;
+      }
+      // Envelope v1: stable schema so Agent gateways can route without guessing.
+      const envelope = {
+        schema: 'inkqueue.device_event.v1',
+        server_time: nowIso(),
+        event: event,
+        signal: event && event.type === 'complete'
+          ? {
+              kind: 'task_completed',
+              task_id: event.task_id || null,
+              title: event.task_title || null,
+              at: event.occurred_at || null,
+              advice: '可提后续；勿重复 add 同意图'
+            }
+          : event && event.type === 'postpone'
+            ? {
+                kind: 'postponed',
+                task_id: event.task_id || null,
+                title: event.task_title || null,
+                at: event.occurred_at || null,
+                target: (event.payload && event.payload.postpone_target) || null,
+                to_due: (event.payload && event.payload.due_date) || null
+              }
+            : null
+      };
+      const body = JSON.stringify(envelope);
+      const isHttps = target.protocol === 'https:';
+      const lib = isHttps ? require('https') : http;
+      const req = lib.request({
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || (isHttps ? 443 : 80),
+        path: target.pathname + target.search,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-        timeout: 5000
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Length': Buffer.byteLength(body),
+          'User-Agent': 'InkQueue-Server/0.9'
+        },
+        timeout: 5000,
+        rejectUnauthorized: false
+      }, (res) => {
+        res.resume();
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          console.log('[webhook] ok', event && event.type, event && event.task_id, '->', res.statusCode);
+        } else {
+          console.warn('[webhook] non-2xx', res.statusCode, event && event.type);
+        }
       });
-      req.on('error', () => { /* fire-and-forget */ });
-      req.on('timeout', () => { req.destroy(); });
+      req.on('error', (err) => { console.warn('[webhook] error', err.message); });
+      req.on('timeout', () => { req.destroy(); console.warn('[webhook] timeout'); });
       req.write(body);
       req.end();
-    } catch (e) { /* fire-and-forget */ }
+    } catch (e) {
+      console.warn('[webhook] failed', e && e.message);
+    }
   });
 }
 
@@ -925,14 +989,35 @@ async function handleRequest(req, res) {
     const index = store.tasks.findIndex((task) => task.id === id);
     if (index === -1) { sendJson(res, 404, { error: 'not found' }); return; }
     const allowed = {};
-    for (const key of ['title', 'note', 'status', 'due_date', 'due_time', 'priority', 'source', 'force_today', 'today', 'completed_at']) {
+    const AGENT_TEXT = ['title', 'note', 'project', 'why', 'source_session', 'priority', 'source', 'force_today', 'today'];
+    const LIFECYCLE = ['status', 'due_date', 'due_time', 'completed_at'];
+    for (const key of AGENT_TEXT.concat(LIFECYCLE)) {
       if (Object.prototype.hasOwnProperty.call(input, key)) allowed[key] = input[key];
     }
-    const updated = normalizeTask(allowed, store.tasks[index]);
+    const before = store.tasks[index];
+    const updated = normalizeTask(allowed, before);
     if (updated.status === 'done' && !updated.completed_at) updated.completed_at = nowIso();
+    // Conflict v2: agent text patch never silently rewrites device-applied status/due
+    // unless the agent explicitly sent those lifecycle keys in this request.
+    const textOnly = Object.keys(allowed).every((k) => AGENT_TEXT.includes(k));
+    if (textOnly) {
+      updated.status = before.status;
+      updated.due_date = before.due_date;
+      updated.due_time = before.due_time;
+      updated.completed_at = before.completed_at;
+    }
     store.tasks[index] = updated;
     writeStore(store);
-    sendJson(res, 200, { task: publicTask(updated) }); return;
+    sendJson(res, 200, {
+      task: publicTask(updated),
+      conflict_policy: 'agent_text_device_lifecycle',
+      merged: {
+        agent_fields: AGENT_TEXT.filter((k) => Object.prototype.hasOwnProperty.call(allowed, k)),
+        preserved_lifecycle: textOnly
+          ? ['status', 'due_date', 'due_time', 'completed_at']
+          : []
+      }
+    }); return;
   }
 
   if (req.method === 'POST' && url.pathname === '/v1/tasks/operations') {
@@ -996,7 +1081,7 @@ async function handleRequest(req, res) {
         created.push(publicTask(task));
       } else {
         const allowed = {};
-        for (const key of ['title', 'note', 'status', 'due_date', 'due_time', 'priority', 'source', 'force_today', 'today', 'completed_at']) {
+        for (const key of ['title', 'note', 'project', 'why', 'source_session', 'status', 'due_date', 'due_time', 'priority', 'source', 'force_today', 'today', 'completed_at']) {
           if (Object.prototype.hasOwnProperty.call(taskInput, key)) allowed[key] = taskInput[key];
         }
         const task = normalizeTask(allowed, store.tasks[index]);
@@ -1102,5 +1187,11 @@ module.exports = {
   validateStartupConfig,
   cliproxy,
   listEvents,
-  deriveSignals
+  deriveSignals,
+  normalizeTask,
+  applyComplete,
+  applyPostpone,
+  publicTask,
+  notifyAgentWebhook,
+  agentWebhookUrl
 };

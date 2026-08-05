@@ -55,7 +55,15 @@ Add / patch options:
   --priority <normal|high>
   --status <todo|done|archived>
   --source <agent|device|imported>
+  --why <text>          short context/rationale (audited)
+  --source-session <id> session id that produced this change (audited)
   --force              allow due-only patch on chronic_postpone tasks
+
+Triage:
+  inkq patch triage             dry-run: show plan (chronic + today overflow)
+  inkq patch triage --apply     apply patches (defer chronic to next Mon,
+                                 overflow today to this weekend)
+  inkq patch triage --cap <N>   override today cap (default 5)
 
 Global:
   --base-url <url>     default ${DEFAULT_BASE}
@@ -217,6 +225,8 @@ async function cmdAdd(cfg, flags) {
   if (flags.time !== undefined) body.due_time = flags.time;
   if (flags.priority !== undefined) body.priority = flags.priority;
   if (flags.status !== undefined) body.status = flags.status;
+  if (flags.why !== undefined) body.why = flags.why;
+  if (flags['source-session'] !== undefined) body.source_session = flags['source-session'];
 
   const res = await apiCreateTask(cfg, body);
   if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
@@ -240,6 +250,8 @@ async function cmdPatch(cfg, id, flags) {
   if (flags.time !== undefined) body.due_time = flags.time;
   if (flags.priority !== undefined) body.priority = flags.priority;
   if (flags.status !== undefined) body.status = flags.status;
+  if (flags.why !== undefined) body.why = flags.why;
+  if (flags['source-session'] !== undefined) body.source_session = flags['source-session'];
   if (flags.source !== undefined) body.source = flags.source;
   if (Object.keys(body).length === 0) {
     fail(1, 'nothing_to_patch', { hint: 'pass --title/--note/--due/--time/--priority/--status' });
@@ -306,6 +318,120 @@ async function cmdEvents(cfg, flags) {
   );
 }
 
+async function cmdTriage(cfg, flags) {
+  // 1) Load context (today's open count, suggestion) + chronic signals.
+  const [ctxRes, evRes] = await Promise.all([
+    apiContext(cfg).catch((e) => ({ status: 0, json: null, err: e })),
+    apiEvents(cfg, { limit: 80 }).catch((e) => ({ status: 0, json: null, err: e }))
+  ]);
+  if (ctxRes.status === 401 || ctxRes.status === 403)
+    fail(2, 'auth_rejected', ctxRes.json);
+  if (ctxRes.status !== 200) fail(2, 'context_failed', { status: ctxRes.status });
+
+  const ctx = ctxRes.json || {};
+  const todayOpen = Number(ctx.today_open || 0);
+
+  const signals = (evRes.json && evRes.json.signals) || [];
+  const chronic = signals.filter((s) => s && s.kind === 'chronic_postpone');
+  const chronicIds = new Set(chronic.map((s) => s.task_id));
+
+  // 2) Recommend: cap today at 5. Over-cap -> push overflow to this weekend.
+  const CAP = Number(flags.cap) || 5;
+  const overflow = Math.max(0, todayOpen - CAP);
+  const plan = { chronic: chronic.length, today_open: todayOpen, cap: CAP, overflow, actions: [] };
+
+  // 3) Chronic tasks: suggest defer-to-late-week (nextMon) or cancel. --apply patches them.
+  const today = new Date();
+  const nextMon = fmtDateOffset(today, nextMondayDelta(today));
+  for (const s of chronic) {
+    plan.actions.push({
+      action: 'defer_chronic_late',
+      task_id: s.task_id,
+      title: s.title || null,
+      reason: 'chronic_postpone',
+      new_due_date: nextMon,
+      submitter: s.submitter || null,
+      suggest: chronic.length > 0 && hopeDeferredChronic(overflow, chronic.length)
+        ? 'defer_to_next_mon'
+        : 'ask_user_cancel'
+    });
+  }
+
+  // 4) Overflow today tasks (non-chronic): defer to this weekend.
+  const snapRes = await apiSnapshot(cfg).catch((e) => ({ status: 0, json: null, err: e }));
+  let todayDeferred = 0;
+  if (snapRes.status === 200 && snapRes.json && Array.isArray(snapRes.json.tasks)) {
+    const todayStr = fmtDateOffset(today, 0);
+    const weekendStr = fmtDateOffset(today, saturdayDelta(today));
+    const todayTasks = snapRes.json.tasks
+      .filter((t) => t.status === 'todo' && !chronicIds.has(t.id) && t.due_date === todayStr)
+      .slice(0, overflow);
+    for (const t of todayTasks) {
+      plan.actions.push({
+        action: 'defer_overflow_weekend',
+        task_id: t.id,
+        title: t.title,
+        new_due_date: weekendStr,
+        preserve_due_time: t.due_time || null
+      });
+    }
+  } else {
+    plan.snapshot_unavailable = snapRes.err ? snapRes.err.message : `status=${snapRes.status}`;
+  }
+
+  // 5) Apply mode: actually patch. Dry-run only otherwise.
+  if (flags.apply !== 'true' && flags.apply !== true) {
+    emit({ ok: true, triage: plan, applied: false }, `dry-run: ${plan.actions.length} suggested action(s)`);
+    return;
+  }
+
+  const results = [];
+  for (const a of plan.actions) {
+    try {
+      const body = { due_date: a.new_due_date };
+      if (a.action === 'defer_chronic_late') body.force = true;
+      const res = await apiPatchTask(cfg, a.task_id, body);
+      if (res.status !== 200) {
+        results.push({ task_id: a.task_id, ok: false, status: res.status, error: res.json });
+      } else {
+        results.push({ task_id: a.task_id, ok: true, due_date: (res.json.task || {}).due_date });
+      }
+    } catch (e) {
+      results.push({ task_id: a.task_id, ok: false, error: String(e.message) });
+    }
+  }
+
+  emit(
+    { ok: true, triage: plan, applied: true, results },
+    `applied ${results.filter((r) => r.ok).length}/${results.length} patch(es)`
+  );
+}
+
+function hopeDeferredChronic(overflow, chronicCount) {
+  return overflow === 0 && chronicCount > 0; // no pressure today -> push chronic to next boundary
+}
+
+function fmtDateOffset(base, dayDelta) {
+  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + dayDelta);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function saturdayDelta(base) {
+  // week starts Monday (0=Mon..6=Sun) per project defaults.
+  const wd = (base.getDay() + 6) % 7; // Mon=0..Sun=6
+  if (wd <= 4) return 5 - wd; // Mon-Fri -> this Saturday
+  return 7 - wd + 5; // Sat/Sun -> next Saturday
+}
+
+function nextMondayDelta(base) {
+  const wd = (base.getDay() + 6) % 7;
+  if (wd === 0) return 7; // Monday -> next Monday
+  return 8 - wd; // other -> next Monday
+}
+
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   if (parsed.flags.help || parsed._.length === 0) usage(parsed._.length === 0 ? 1 : 0);
@@ -337,6 +463,13 @@ async function main() {
         await cmdAdd(cfg, parsed.flags);
         break;
       case 'patch':
+        if (arg1 === 'triage') {
+          await cmdTriage(cfg, parsed.flags);
+          break;
+        }
+  if (parsed.flags.apply === 'true' || parsed.flags.apply === true) {
+    fail(1, 'triage_usage', { hint: 'inkq patch triage --apply   (dry-run: inkq patch triage)' });
+  }
         if (!arg1) fail(1, 'id_required', { hint: 'inkq patch <task_id> --title ...' });
         await cmdPatch(cfg, arg1, parsed.flags);
         break;
