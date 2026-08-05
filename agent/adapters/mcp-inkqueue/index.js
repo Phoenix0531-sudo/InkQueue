@@ -7,13 +7,12 @@
  * Zero deps. Reuses agent/lib/client.js only (no second HTTP stack).
  * Optional; main path remains: node agent/inkq.js
  *
- * Protocol: MCP over stdio, Content-Length framed JSON-RPC 2.0
+ * Protocol: MCP over stdio, newline-delimited JSON-RPC 2.0
+ *   (matches official Python mcp SDK used by Hermes; NOT Content-Length)
  *   tools: health, context, list, get, add, patch, events
  */
 
 const path = require('path');
-const readline = require('readline');
-
 // agent/adapters/mcp-inkqueue → agent/lib/client.js
 const client = require(path.join(__dirname, '..', '..', 'lib', 'client.js'));
 const {
@@ -352,9 +351,10 @@ async function callTool(name, args) {
 }
 
 function writeMessage(msg) {
-  const body = Buffer.from(JSON.stringify(msg), 'utf8');
-  process.stdout.write(`Content-Length: ${body.length}\r\n\r\n`);
-  process.stdout.write(body);
+  // Official MCP Python SDK (Hermes) uses newline-delimited JSON on stdio,
+  // not LSP-style Content-Length framing.
+  const line = JSON.stringify(msg) + '\n';
+  process.stdout.write(line);
 }
 
 function sendResult(id, result) {
@@ -431,28 +431,19 @@ async function handleRpc(msg) {
   sendError(id, -32601, `Method not found: ${method}`);
 }
 
-// Content-Length framed reader (MCP stdio)
-let buf = Buffer.alloc(0);
+// Newline-delimited JSON reader (MCP stdio, matches Python mcp SDK)
+let lineBuf = '';
 
-function tryConsume() {
-  while (true) {
-    const headerEnd = buf.indexOf('\r\n\r\n');
-    if (headerEnd === -1) return;
-    const header = buf.slice(0, headerEnd).toString('utf8');
-    const match = /Content-Length:\s*(\d+)/i.exec(header);
-    if (!match) {
-      // drop until next possible frame
-      buf = buf.slice(headerEnd + 4);
-      continue;
-    }
-    const len = parseInt(match[1], 10);
-    const start = headerEnd + 4;
-    if (buf.length < start + len) return;
-    const body = buf.slice(start, start + len).toString('utf8');
-    buf = buf.slice(start + len);
+function tryConsumeLines() {
+  let nl;
+  while ((nl = lineBuf.indexOf('\n')) !== -1) {
+    const raw = lineBuf.slice(0, nl);
+    lineBuf = lineBuf.slice(nl + 1);
+    const line = raw.replace(/\r$/, '').trim();
+    if (!line) continue;
     let msg;
     try {
-      msg = JSON.parse(body);
+      msg = JSON.parse(line);
     } catch (err) {
       writeMessage({
         jsonrpc: '2.0',
@@ -471,9 +462,10 @@ function tryConsume() {
   }
 }
 
+process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
-  buf = Buffer.concat([buf, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
-  tryConsume();
+  lineBuf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+  tryConsumeLines();
 });
 
 process.stdin.on('end', () => process.exit(0));

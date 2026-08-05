@@ -4,6 +4,7 @@
 /**
  * Smoke-test mcp-inkqueue over stdio without an MCP host.
  * Spawns the server, sends initialize + tools/list + tools/call health/context/events.
+ * Framing: newline-delimited JSON (Hermes / official mcp Python SDK).
  */
 
 const { spawn } = require('child_process');
@@ -12,33 +13,7 @@ const path = require('path');
 const SERVER = path.join(__dirname, 'index.js');
 
 function frame(obj) {
-  const body = Buffer.from(JSON.stringify(obj), 'utf8');
-  return Buffer.concat([
-    Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, 'utf8'),
-    body
-  ]);
-}
-
-function readFrames(buf) {
-  const out = [];
-  let rest = buf;
-  while (true) {
-    const idx = rest.indexOf('\r\n\r\n');
-    if (idx === -1) break;
-    const header = rest.slice(0, idx).toString('utf8');
-    const m = /Content-Length:\s*(\d+)/i.exec(header);
-    if (!m) {
-      rest = rest.slice(idx + 4);
-      continue;
-    }
-    const len = parseInt(m[1], 10);
-    const start = idx + 4;
-    if (rest.length < start + len) break;
-    const body = rest.slice(start, start + len).toString('utf8');
-    rest = rest.slice(start + len);
-    out.push(JSON.parse(body));
-  }
-  return { messages: out, rest };
+  return JSON.stringify(obj) + '\n';
 }
 
 function fail(msg) {
@@ -56,16 +31,27 @@ async function main() {
     env: process.env
   });
 
-  let stdout = Buffer.alloc(0);
+  let lineBuf = '';
   const pending = new Map();
   let nextId = 1;
   let closed = false;
 
+  child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk) => {
-    stdout = Buffer.concat([stdout, chunk]);
-    const { messages, rest } = readFrames(stdout);
-    stdout = rest;
-    for (const msg of messages) {
+    lineBuf += chunk;
+    let nl;
+    while ((nl = lineBuf.indexOf('\n')) !== -1) {
+      const raw = lineBuf.slice(0, nl);
+      lineBuf = lineBuf.slice(nl + 1);
+      const line = raw.replace(/\r$/, '').trim();
+      if (!line) continue;
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch (err) {
+        process.stderr.write('bad json line: ' + line.slice(0, 120) + '\n');
+        continue;
+      }
       if (msg && msg.id != null && pending.has(msg.id)) {
         const { resolve } = pending.get(msg.id);
         pending.delete(msg.id);
@@ -119,9 +105,7 @@ async function main() {
     ok('initialize');
 
     // notification — no response expected
-    child.stdin.write(
-      frame({ jsonrpc: '2.0', method: 'notifications/initialized' })
-    );
+    child.stdin.write(frame({ jsonrpc: '2.0', method: 'notifications/initialized' }));
 
     const listed = await rpc('tools/list');
     const tools = (listed.result && listed.result.tools) || [];

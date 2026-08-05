@@ -10,7 +10,7 @@ node agent/inkq.js …
 
 ## 特点
 
-- 纯 **stdio** MCP（Content-Length JSON-RPC）
+- 纯 **stdio** MCP（换行分隔 JSON-RPC，对齐 Hermes / 官方 Python mcp SDK）
 - **零依赖**（不装 `@modelcontextprotocol/sdk`）
 - tools：`health` / `context` / `list` / `get` / `add` / `patch` / `events`
 - `events` 含 raw + 派生 `signals`
