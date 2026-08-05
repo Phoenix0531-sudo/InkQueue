@@ -4,7 +4,7 @@
 
 A minimal task terminal for Kindle Paperwhite 3 (Android 4.4.2, KOSP/CracKDroid) where the AI Agent remotely maintains task data and the e-ink device handles lightweight viewing, completion, and postponement.
 
-v0.9.0 · JVM unit tests green · ~50 KB APK · minSdk 19 · zero AndroidX · agent CLI `inkq` · partial refresh · 今日已做 · LAN discover · chronic hard rules
+v0.9.1 · JVM + 30 server + 16 agent triage tests green · ~96 KB APK · minSdk 19 · zero AndroidX · agent CLI `inkq` · partial refresh · 今日已做 · LAN discover · chronic hard rules · triage · audit fields · webhook envelope
 
 ---
 
@@ -124,14 +124,16 @@ The debug APK lands at:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Verified build / device result (this repo, 2026-08-04):
+Verified build / device result (this repo, 2026-08-05):
 
 ```
 APK: android/app/build/outputs/apk/debug/app-debug.apk
 versionName 0.8.2 / versionCode 82
-size ~49,826 bytes (~50 KB)
+size ~96,000 bytes (~96 KB)
 JVM unit tests green (DateUtils / SectionedTaskList / PendingOperation / JsonUtils / SyncResult)
-Node server tests historically 28/28
+Node server tests 30/30 (events / context / webhook envelope)
+Agent triage tests 16/16 (lib/triage.js pure logic)
+Root npm test orchestrates agent + server suites
 Kindle PW3 e2e: snapshot sync + complete + postpone via inkq-written tasks
 ```
 
@@ -328,11 +330,13 @@ UI dump after the operations confirmed: title `任务`, status `已同步 22:35`
 }
 ```
 
-**P8 outbound agent webhook**: server forwards each device event to a configurable `agent_webhook_url` (fire-and-forget). Unit test `P8 outbound agent webhook fires on complete operation when configured` 28/28 passing.
+**P8 outbound agent webhook**: server forwards each device event to a configurable `agent_webhook_url` (fire-and-forget). Unit test `P8 outbound agent webhook fires on complete operation with envelope` 30/30 passing (envelope `inkqueue.device_event.v1`).
 
-Test totals (2026-08-04):
-- Android: version 0.8.2 / ~50 KB APK; JVM unit tests green
-- Node API tests: 28/28 (events / context / webhook covered)
+Test totals (2026-08-05):
+- Android: version 0.8.2 / ~96 KB APK; JVM unit tests green
+- Node API tests: 30/30 (events / context / webhook envelope covered)
+- Agent triage tests: 16/16 (`agent/lib/triage.js` pure logic)
+- Root `npm test` orchestrates both suites
 - Agent layer: `node agent/test-inkq-smoke.js` live pass (no skill required)
 - Device e2e: inkq add → Kindle sync → complete/postpone → `inkq events`
 
