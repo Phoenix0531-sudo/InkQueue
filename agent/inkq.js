@@ -22,6 +22,7 @@
 
 const path = require('path');
 const client = require(path.join(__dirname, 'lib', 'client.js'));
+const triageMod = require(path.join(__dirname, 'lib', 'triage.js'));
 
 const {
   DEFAULT_BASE,
@@ -336,134 +337,69 @@ async function cmdTriage(cfg, flags) {
 
   const signals = (evRes.json && evRes.json.signals) || [];
   const chronic = signals.filter((s) => s && s.kind === 'chronic_postpone');
-  const chronicIds = new Set(chronic.map((s) => s.task_id));
 
-  // 2) Recommend: cap today at 5. Over-cap -> push overflow to this weekend.
-  const CAP = Number(flags.cap) || 5;
-  const overflow = Math.max(0, todayOpen - CAP);
-  const plan = { chronic: chronic.length, today_open: todayOpen, cap: CAP, overflow, actions: [] };
-
-  // 3) Chronic tasks: per hard rule, NEVER auto-defer (that's "只改 due 糊弄").
-  //    Always suggest ask_user_cancel; --apply refuses to patch chronic
-  //    unless caller passes --force-chronic (the chronic_block guard at
-  //    server side already enforces force for due-only patches).
-  const today = new Date();
-  const nextMon = fmtDateOffset(today, nextMondayDelta(today));
-  for (const s of chronic) {
-    plan.actions.push({
-      action: 'chronic_ask_user',
-      task_id: s.task_id,
-      title: s.title || null,
-      reason: 'chronic_postpone',
-      postpone_count_window: s.postpone_count_window || null,
-      last_at: s.last_at || null,
-      suggest: 'ask_user_cancel_or_split',
-      // never auto-apply; shown for reference if user decides to defer
-      deferred_due_date_if_forced: nextMon
-    });
-  }
-  const forceChronic = flags['force-chronic'] === 'true' || flags['force-chronic'] === true;
-
-  // 4) Overflow today tasks (non-chronic): defer to this weekend.
+  // 4) Overflow today tasks (non-chronic): need snapshot to know titles.
   const snapRes = await apiSnapshot(cfg).catch((e) => ({ status: 0, json: null, err: e }));
-  let todayDeferred = 0;
+  let todayTasks = [];
   if (snapRes.status === 200 && snapRes.json && Array.isArray(snapRes.json.tasks)) {
-    const todayStr = fmtDateOffset(today, 0);
-    const weekendStr = fmtDateOffset(today, saturdayDelta(today));
-    const todayTasks = snapRes.json.tasks
-      .filter((t) => t.status === 'todo' && !chronicIds.has(t.id) && t.due_date === todayStr)
-      .slice(0, overflow);
-    for (const t of todayTasks) {
-      plan.actions.push({
-        action: 'defer_overflow_weekend',
-        task_id: t.id,
-        title: t.title,
-        new_due_date: weekendStr,
-        preserve_due_time: t.due_time || null
-      });
-    }
-  } else {
+    const todayStr = triageMod.fmtDateOffset(new Date(), 0);
+    todayTasks = snapRes.json.tasks
+      .filter((t) => t.status === 'todo' && t.due_date === todayStr)
+      .map((t) => ({ id: t.id, title: t.title, due_time: t.due_time }));
+  }
+
+  // 2) Pure plan via lib/triage.js.
+  const CAP = Number(flags.cap) || 5;
+  const plan = triageMod.planTriage({
+    today_open: todayOpen,
+    cap: CAP,
+    chronic: chronic,
+    today_tasks: todayTasks,
+    now: new Date()
+  });
+  if (snapRes.status !== 200) {
     plan.snapshot_unavailable = snapRes.err ? snapRes.err.message : `status=${snapRes.status}`;
   }
 
-  // 5) Apply mode: actually patch. Dry-run only otherwise.
+  // 3) Apply mode: actually patch. Dry-run only otherwise.
   if (flags.apply !== 'true' && flags.apply !== true) {
     emit({ ok: true, triage: plan, applied: false }, `dry-run: ${plan.actions.length} suggested action(s)`);
     return;
   }
 
+  const forceChronic = flags['force-chronic'] === 'true' || flags['force-chronic'] === true;
+  const applyList = triageMod.applyableActions(plan.actions, forceChronic);
+  const skippedChronic = plan.actions.filter((a) => a.action === 'chronic_ask_user').length - applyList.filter((a) => a.action === 'chronic_ask_user').length;
+
   const results = [];
-  let skippedChronic = 0;
   for (const a of plan.actions) {
-    // chronic: never auto-apply (hard rule). Only patch if --force-chronic.
-    if (a.action === 'chronic_ask_user') {
-      if (!forceChronic) {
-        skippedChronic++;
-        results.push({
-          task_id: a.task_id,
-          ok: false,
-          skipped: true,
-          reason: 'chronic_needs_user_decision',
-          hint: '问用户是否取消/拆分；或加 --force-chronic 强制推迟到 ' + a.deferred_due_date_if_forced
-        });
-        continue;
-      }
-      // forced: patch due to nextMon with force (server chronic_block bypass)
-      try {
-        const res = await apiPatchTask(cfg, a.task_id, {
-          due_date: a.deferred_due_date_if_forced,
-          force: true
-        });
-        if (res.status !== 200) {
-          results.push({ task_id: a.task_id, ok: false, status: res.status, error: res.json });
-        } else {
-          results.push({ task_id: a.task_id, ok: true, due_date: (res.json.task || {}).due_date, forced: true });
-        }
-        continue;
-      } catch (e) {
-        results.push({ task_id: a.task_id, ok: false, error: String(e.message) });
-        continue;
-      }
+    if (a.action === 'chronic_ask_user' && !forceChronic) {
+      results.push({
+        task_id: a.task_id, ok: false, skipped: true,
+        reason: 'chronic_needs_user_decision',
+        hint: '问用户是否取消/拆分；或加 --force-chronic 强制推迟到 ' + a.deferred_due_date_if_forced
+      });
+      continue;
     }
-    // overflow weekend defer
+    const due = a.action === 'chronic_ask_user' ? a.deferred_due_date_if_forced : a.new_due_date;
+    const body = { due_date: due };
+    if (a.action === 'chronic_ask_user') body.force = true;
     try {
-      const body = { due_date: a.new_due_date };
       const res = await apiPatchTask(cfg, a.task_id, body);
       if (res.status !== 200) {
         results.push({ task_id: a.task_id, ok: false, status: res.status, error: res.json });
       } else {
-        results.push({ task_id: a.task_id, ok: true, due_date: (res.json.task || {}).due_date });
+        results.push({ task_id: a.task_id, ok: true, due_date: (res.json.task || {}).due_date, forced: a.action === 'chronic_ask_user' || undefined });
       }
     } catch (e) {
       results.push({ task_id: a.task_id, ok: false, error: String(e.message) });
     }
   }
 
-  const applyHint = skippedChronic
+  const applyHint = skippedChronic > 0
     ? `applied ${results.filter((r) => r.ok).length}/${results.length}; ${skippedChronic} chronic skipped (ask user)`
     : `applied ${results.filter((r) => r.ok).length}/${results.length} patch(es)`;
   emit({ ok: true, triage: plan, applied: true, results }, applyHint);
-}
-
-function fmtDateOffset(base, dayDelta) {
-  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + dayDelta);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function saturdayDelta(base) {
-  // week starts Monday (0=Mon..6=Sun) per project defaults.
-  const wd = (base.getDay() + 6) % 7; // Mon=0..Sun=6
-  if (wd <= 4) return 5 - wd; // Mon-Fri -> this Saturday
-  return 7 - wd + 5; // Sat/Sun -> next Saturday
-}
-
-function nextMondayDelta(base) {
-  const wd = (base.getDay() + 6) % 7;
-  if (wd === 0) return 7; // Monday -> next Monday
-  return 8 - wd; // other -> next Monday
 }
 
 async function main() {
