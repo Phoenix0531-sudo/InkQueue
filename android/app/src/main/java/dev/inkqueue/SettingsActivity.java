@@ -7,6 +7,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.view.Gravity;
@@ -18,6 +19,8 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
+import dev.inkqueue.sync.ServerDiscovery;
 import dev.inkqueue.sync.SyncService;
 
 /**
@@ -118,6 +121,10 @@ public class SettingsActivity extends Activity {
 
         // Action set — same as detail page: 2px rule + 84px row + bold label
         addRule(root, RULE_ACTION_H);
+        root.addView(actionRow("探测同步地址", SAVE_SP, true, SAVE_ROW_H, new View.OnClickListener() {
+            @Override public void onClick(View v) { discoverServer(); }
+        }));
+        addRule(root, RULE_ACTION_H);
         root.addView(actionRow("保存", SAVE_SP, true, SAVE_ROW_H, new View.OnClickListener() {
             @Override public void onClick(View v) { save(); }
         }));
@@ -167,6 +174,28 @@ public class SettingsActivity extends Activity {
         v.setMinimumHeight(dp(rowH));
         v.setOnClickListener(listener);
         return v;
+    }
+
+    private void discoverServer() {
+        Toast.makeText(this, "正在探测局域网…", Toast.LENGTH_SHORT).show();
+        new AsyncTask<Void, Void, ServerDiscovery.Result>() {
+            @Override protected ServerDiscovery.Result doInBackground(Void... voids) {
+                return ServerDiscovery.discover(ServerDiscovery.DEFAULT_TIMEOUT_MS);
+            }
+            @Override protected void onPostExecute(ServerDiscovery.Result result) {
+                if (isFinishing()) return;
+                if (result == null) {
+                    Toast.makeText(SettingsActivity.this,
+                            "未找到服务器。请确认电脑已启动 InkQueue 且同一局域网。",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                baseUrl.setText(result.baseUrl);
+                Toast.makeText(SettingsActivity.this,
+                        "已找到 " + result.baseUrl + "，请点保存",
+                        Toast.LENGTH_LONG).show();
+            }
+        }.execute();
     }
 
     private void save() {

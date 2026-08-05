@@ -39,7 +39,7 @@ public class InkMainView extends View {
     private final Paint ink = new Paint();
     private Listener listener;
 
-    private static final String[] tabNames = {"过期", "今日", "本周", "以后"};
+    private static final String[] tabNames = {"过期", "今日", "本周", "以后", "已做"};
     private int currentPage = 1;
 
     private List<Row> rows = new ArrayList<Row>();
@@ -76,7 +76,7 @@ public class InkMainView extends View {
     private static final int META_INDENT = CHECK_BOX + CHECK_GAP;
 
     // computed touch rectangles
-    private final Rect[] tabRects = new Rect[4];
+    private final Rect[] tabRects = new Rect[5];
     private final Rect footerSyncRect = new Rect();
     private final Rect footerSettingsRect = new Rect();
     private final List<Rect> rowTouchRects = new ArrayList<Rect>();
@@ -99,20 +99,87 @@ public class InkMainView extends View {
     public void setPage(int page, List<Row> pageRows) {
         this.currentPage = page;
         this.rows = pageRows == null ? new ArrayList<Row>() : pageRows;
+        filledFlashTaskId = null;
         recomputeLayout();
         invalidate();
     }
 
     public void setStatusText(String text) {
         this.statusText = text == null ? "" : text;
-        invalidate();
+        invalidateMasthead();
     }
 
     /** v0.6: "待同步 N 条" in masthead. n=0 shows nothing. */
     public void setPendingCount(int n) {
         this.pendingCount = n < 0 ? 0 : n;
-        invalidate();
+        invalidateMasthead();
     }
+
+    /**
+     * v0.9: dirty only the masthead band (title + status + rule).
+     * On e-ink this is much cheaper than a full-screen flash.
+     */
+    public void invalidateMasthead() {
+        int w = getWidth();
+        if (w <= 0) {
+            invalidate();
+            return;
+        }
+        int bottom = MASTHEAD_TOPPAD + TITLE_SP + 12 + STATUS_SP + 10 + RULE_MASTHEAD_H + 8;
+        invalidate(0, 0, w, bottom);
+    }
+
+    /**
+     * v0.9: after complete/postpone, re-layout and dirty from the changed
+     * row downward (tabs stay put → less full-panel flash).
+     */
+    public void setPagePartial(int page, List<Row> pageRows, int dirtyFromRow) {
+        this.currentPage = page;
+        this.rows = pageRows == null ? new ArrayList<Row>() : pageRows;
+        recomputeLayout();
+        int w = getWidth();
+        int h = getHeight();
+        if (w <= 0 || h <= 0) {
+            invalidate();
+            return;
+        }
+        int top = contentTopY();
+        if (dirtyFromRow >= 0 && dirtyFromRow < rowTouchRects.size()) {
+            top = Math.min(top, rowTouchRects.get(dirtyFromRow).top - ROW_PAD_V);
+        } else if (dirtyFromRow >= 0 && !rowTouchRects.isEmpty()) {
+            // row already gone — start from first remaining or content top
+            top = contentTopY();
+        }
+        // Include footer so removal reflow doesn't leave ghosts
+        invalidate(0, Math.max(0, top - 4), w, h);
+    }
+
+    /** Y where tab bar ends / row content begins. */
+    public int contentTopY() {
+        int mastheadH = MASTHEAD_TOPPAD + TITLE_SP + 12 + STATUS_SP + 10 + RULE_MASTHEAD_H;
+        return mastheadH + 4 + TAB_BAR_H + RULE_TAB_H + RULE_TAB_BAR_H + 18;
+    }
+
+    /**
+     * Flash a filled checkbox on the given task row (small dirty rect)
+     * before the list reflows — visual confirmation without full redraw.
+     */
+    public void flashCheckboxFilled(String taskId) {
+        if (taskId == null) return;
+        for (int i = 0; i < checkboxIdx.size(); i++) {
+            int rowI = checkboxIdx.get(i);
+            if (rowI < 0 || rowI >= rows.size()) continue;
+            Row r = rows.get(rowI);
+            if (r.task == null || !taskId.equals(r.task.id)) continue;
+            Rect box = checkboxRects.get(i);
+            // mark for one-shot fill in onDraw
+            filledFlashTaskId = taskId;
+            invalidate(box.left - 2, box.top - 2, box.right + 2, box.bottom + 2);
+            return;
+        }
+    }
+
+    private String filledFlashTaskId = null;
 
     private static int pageIndex(int page) { return page; }
 
@@ -133,8 +200,9 @@ public class InkMainView extends View {
         int mastheadH = MASTHEAD_TOPPAD + TITLE_SP + 12 + STATUS_SP + 10 + RULE_MASTHEAD_H;
         int tabTop = mastheadH + 4;
         int tabBottom = tabTop + TAB_BAR_H;
-        int colW = innerW / 4;
-        for (int i = 0; i < 4; i++) {
+        int tabN = tabNames.length;
+        int colW = innerW / tabN;
+        for (int i = 0; i < tabN; i++) {
             tabRects[i] = new Rect(PAD + i * colW, tabTop, PAD + (i + 1) * colW, tabBottom);
         }
 
@@ -246,9 +314,10 @@ public class InkMainView extends View {
         int mastheadH = MASTHEAD_TOPPAD + TITLE_SP + 12 + STATUS_SP + 10 + RULE_MASTHEAD_H;
         int tabTop = mastheadH + 4;
         int tabBottom = tabTop + TAB_BAR_H;
-        int colW = innerW / 4;
+        int tabN = tabNames.length;
+        int colW = innerW / tabN;
         int activeIdx = pageIndex(currentPage);
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < tabN; i++) {
             String name = tabNames[i];
             boolean selected = (i == activeIdx);
             ink.setTextSize(selected ? TAB_SP_SELECTED : TAB_SP);
@@ -330,6 +399,11 @@ public class InkMainView extends View {
             ink.setStrokeWidth(2.0f);  // v0.7 — heavier stroke per §3.3.1 contrast guideline
             canvas.drawRect(cbLeft + 1.0f, cbTop + 1.0f, cbRight - 1.0f, cbBottom - 1.0f, ink);
             ink.setStyle(Paint.Style.FILL);
+            // v0.9: brief filled checkbox on complete (partial dirty)
+            if (filledFlashTaskId != null && r.task != null
+                    && filledFlashTaskId.equals(r.task.id)) {
+                canvas.drawRect(cbLeft + 4.0f, cbTop + 4.0f, cbRight - 4.0f, cbBottom - 4.0f, ink);
+            }
 
             int titleStartX = PAD + CHECK_BOX + CHECK_GAP;
             int titleBaseline = top + TASK_SP + 4;
@@ -431,7 +505,7 @@ public class InkMainView extends View {
                 if (dt >= LONG_PRESS_THRESHOLD) return true; // was slow tap — treat as long-press-zone
 
                 // tabs
-                for (int i = 0; i < 4; i++) {
+                for (int i = 0; i < tabNames.length; i++) {
                     if (tabRects[i] != null && tabRects[i].contains(x, y)) {
                         listener.onTabSelected(i); return true;
                     }

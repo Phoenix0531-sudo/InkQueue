@@ -72,6 +72,26 @@ public class SectionedTaskListTest {
         assertEquals("later", grouped.later.get(1).id);
     }
 
+
+    @Test public void doneTodayPageListsCompleted() {
+        List<Task> open = new ArrayList<Task>();
+        List<Task> done = new ArrayList<Task>();
+        Task d = task("d1", "完成了", "done", "2026-07-06", null, false);
+        d.completedAt = "2026-07-06T09:00:00+08:00";
+        done.add(d);
+        SectionedTaskList grouped = SectionedTaskList.group(open, "2026-07-06", done);
+        assertEquals(1, grouped.doneToday.size());
+        List<SectionedTaskList.Row> rows = grouped.pageRows(SectionedTaskList.PAGE_DONE, "2026-07-06");
+        assertEquals(SectionedTaskList.Row.TYPE_SECTION, rows.get(0).type);
+        assertEquals("今日已做", rows.get(0).text);
+        assertEquals(SectionedTaskList.Row.TYPE_TASK, rows.get(1).type);
+        assertTrue(rows.get(1).meta.contains("已完成"));
+    }
+
+    @Test public void pageCountIsFive() {
+        assertEquals(5, SectionedTaskList.pageCount());
+    }
+
     private static Task task(String id, String title, String status, String dueDate, String dueTime, boolean forceToday) {
         Task task = new Task();
         task.id = id;

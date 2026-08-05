@@ -1067,7 +1067,7 @@ if (require.main === module) {
       udpServer.on('message', (msg, rinfo) => {
         const text = msg.toString();
         if (text === 'InkQueue:ping') {
-          const serverIp = rinfo.address === '::1' || rinfo.address === '127.0.0.1' ? '127.0.0.1' : getLocalIP();
+          const serverIp = getLocalIP();
           udpServer.send(`InkQueue:pong:${serverIp}:${DEFAULT_PORT}`, rinfo.port, rinfo.address);
           console.log(`UDP discovery: replied to ${rinfo.address}`);
         }

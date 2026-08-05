@@ -4,7 +4,7 @@
 
 A minimal task terminal for Kindle Paperwhite 3 (Android 4.4.2, KOSP/CracKDroid) where the AI Agent remotely maintains task data and the e-ink device handles lightweight viewing, completion, and postponement.
 
-v0.8.2 · JVM unit tests green · ~50 KB APK · minSdk 19 · zero AndroidX · agent CLI `inkq`
+v0.9.0 · JVM unit tests green · ~50 KB APK · minSdk 19 · zero AndroidX · agent CLI `inkq` · partial refresh · 今日已做 · LAN discover · chronic hard rules
 
 ---
 
@@ -431,7 +431,7 @@ v0.7 没有触及 SettingsActivity——它还是 v0.5 时代的 ScrollView + Li
 
 ---
 
-## Known limitations (v0.8.2)
+## Known limitations (v0.9.0)
 
 - No push notifications — sync is pull-only on app open or manual tap.
 - No multi-user / auth system — single `X-InkQueue-Token` shared between Agent and device.
@@ -442,6 +442,8 @@ v0.7 没有触及 SettingsActivity——它还是 v0.5 时代的 ScrollView + Li
 - ADB on KOSP/CracKDroid can drop to `offline` after sleep; wake the device to restore.
 - HTTP cleartext is for LAN testing. Prefer HTTPS in production.
 - Agent layer does **not** scan chat history; agents must actively call `inkq`.
+- Partial refresh is best-effort on stock Android 4.4 (no vendor e-ink partial API); still dirties less than full `invalidate()`.
+- LAN UDP discovery needs server running and same Wi‑Fi; some APs block broadcast.
 
 ---
 
@@ -463,11 +465,18 @@ v0.7 没有触及 SettingsActivity——它还是 v0.5 时代的 ScrollView + Li
 ### Future (separate projects, not InkQueue core)
 - Daily briefing app / RSS / career radar / WeChat Reading sidecar
 
+### Shipped (v0.9.0 experience pass)
+- Partial list reflow + checkbox flash on complete/postpone (less full-screen flash)
+- Tab **已做** — today’s completed archive
+- `inkq context` surfaces `chronic_postpone[]`; due-only patch blocked unless `--force`
+- `server-ctl install|uninstall` — Windows logon auto-start
+- Settings **探测同步地址** (UDP `InkQueue:ping` → server pong)
+
 ### Later candidates (same product)
-- Stronger e-ink partial refresh for single-row complete
-- Optional MCP wrapper around `inkq` (still no skill requirement)
-- Per-day archive (“today’s done”)
+- Vendor e-ink partial refresh API if available on KOSP
+- Optional MCP wrapper around `inkq` (shipped thin; keep optional)
 - Richer conflict policy when Agent edits a task that still has a pending device op
+- `inkq triage` bulk rearrange
 
 ---
 

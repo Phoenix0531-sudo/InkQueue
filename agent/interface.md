@@ -63,13 +63,16 @@ node agent/inkq.js <command> ...
 | postpone → tomorrow | 今日可能过载；少加「今天」 |
 | postpone → weekend / next week | 降低该条在工作日的优先级，或拆分 |
 | 同一 task 多次 postpone | **不要**只改 due 糊弄；拆分、降级、问用户是否取消 |
+| `chronic_postpone` signal / `inkq context` 的 `chronic_postpone[]` | **硬规则**：`inkq patch --due …` 会被拒绝（`chronic_postpone_block`），除非 `--force`；应拆分新任务、降 priority、改 note、标 done，或问用户取消 |
 
 读反馈用：
 
 ```bash
 node agent/inkq.js events --limit 30
-node agent/inkq.js context
+node agent/inkq.js context   # 附带 chronic_postpone[] + rules
 ```
+
+`context` 在可用时会附带 `chronic_postpone` 列表；看到后**禁止**对该 id 只改 due。
 
 `events` 响应同时含 raw `events` 与派生 `signals`（`task_completed` / `postponed` / `chronic_postpone`）。优先看 `signals` 再决定是否 add/改 due；`chronic_postpone` 出现时禁止无脑再 postpone。
 

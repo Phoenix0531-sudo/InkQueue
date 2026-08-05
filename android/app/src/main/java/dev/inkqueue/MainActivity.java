@@ -25,7 +25,7 @@ import java.util.List;
 /**
  * Main task-list screen for InkQueue.
  *
- * v0.8.2:
+ * v0.9:
  *  - shared TaskRepository (no per-Activity SQLite helper)
  *  - sync phases visible in masthead ("正在上传 N 条…" / "正在拉取…")
  *  - single-flight aware (ignore busy SyncResult without clobbering status)
@@ -121,11 +121,18 @@ public class MainActivity extends Activity implements InkMainView.Listener {
     @Override public void onTaskClicked(String taskId) { openTask(taskId); }
 
     @Override public void onTaskLongPressed(String taskId) {
+        if (currentPage == SectionedTaskList.PAGE_DONE) return; // archive: no postpone
         Task task = repository.getTaskById(taskId);
         if (task != null) showPostponeDialog(task);
     }
 
-    @Override public void onTaskCompleteClicked(String taskId) { completeTaskFromList(taskId); }
+    @Override public void onTaskCompleteClicked(String taskId) {
+        if (currentPage == SectionedTaskList.PAGE_DONE) {
+            openTask(taskId); // archive page: tap box opens detail, no re-complete
+            return;
+        }
+        completeTaskFromList(taskId);
+    }
 
     @Override public void onBulkAction(int actionCode) { bulkPostponeOverdue(actionCode); }
 
@@ -150,9 +157,18 @@ public class MainActivity extends Activity implements InkMainView.Listener {
     }
 
     private void renderLocal() {
+        renderLocal(-1, null);
+    }
+
+    /**
+     * @param partialFromRow if >=0, only dirty from that row band downward (e-ink).
+     * @param flashTaskId optional task id to fill checkbox briefly before reflow.
+     */
+    private void renderLocal(int partialFromRow, String flashTaskId) {
         List<Task> tasks = repository.getAllOpenTasks();
         String today = DateUtils.today();
-        lastGrouped = SectionedTaskList.group(tasks, today);
+        List<Task> doneToday = repository.getCompletedToday(today);
+        lastGrouped = SectionedTaskList.group(tasks, today, doneToday);
 
         if (shouldAutoNavToOverdue && !lastGrouped.overdue.isEmpty()) {
             currentPage = SectionedTaskList.PAGE_OVERDUE;
@@ -160,7 +176,14 @@ public class MainActivity extends Activity implements InkMainView.Listener {
         }
 
         java.util.List<SectionedTaskList.Row> pageRows = lastGrouped.pageRows(currentPage, today);
-        mainView.setPage(currentPage, pageRows);
+        if (flashTaskId != null) {
+            mainView.flashCheckboxFilled(flashTaskId);
+        }
+        if (partialFromRow >= 0) {
+            mainView.setPagePartial(currentPage, pageRows, partialFromRow);
+        } else {
+            mainView.setPage(currentPage, pageRows);
+        }
 
         int pendingN = repository.countPendingOperations();
         mainView.setPendingCount(pendingN);
@@ -180,12 +203,27 @@ public class MainActivity extends Activity implements InkMainView.Listener {
                 if (last == null || last.length() == 0) {
                     last = "未同步";
                 }
-                // residual queue is already shown via setPendingCount; keep last sync text
             } else if (err != null && err.length() > 0 && (last == null || last.length() == 0)) {
                 last = err;
             }
             mainView.setStatusText(last);
         }
+    }
+
+    /** Index of task row in current page touch list, or -1. */
+    private int findRowIndexForTask(String taskId) {
+        if (taskId == null || lastGrouped == null) return -1;
+        String today = DateUtils.today();
+        java.util.List<SectionedTaskList.Row> pageRows = lastGrouped.pageRows(currentPage, today);
+        int touch = 0;
+        for (int i = 0; i < pageRows.size(); i++) {
+            SectionedTaskList.Row r = pageRows.get(i);
+            if (r.type == SectionedTaskList.Row.TYPE_TASK) {
+                if (r.task != null && taskId.equals(r.task.id)) return touch;
+                touch++;
+            }
+        }
+        return -1;
     }
 
     private void syncInBackground(final boolean manual) {
@@ -255,9 +293,13 @@ public class MainActivity extends Activity implements InkMainView.Listener {
         try {
             Task task = repository.getTaskById(taskId);
             if (task == null) return;
+            int rowIdx = findRowIndexForTask(taskId);
+            // Flash filled box while the row is still on screen (e-ink partial).
+            if (rowIdx >= 0) mainView.flashCheckboxFilled(taskId);
             String now = DateUtils.isoNow();
             new OperationQueue(repository).complete(task, now);
-            renderLocal();
+            // Reflow from that row downward — avoid full-screen invalidate.
+            renderLocal(rowIdx >= 0 ? rowIdx : 0, null);
             Toast.makeText(this, isOnline() ? "已完成" : "已完成，联网后同步", Toast.LENGTH_SHORT).show();
             syncInBackground(false);
         } catch (Exception e) {
@@ -300,8 +342,9 @@ public class MainActivity extends Activity implements InkMainView.Listener {
                 default: return;
             }
             String[] targets = {"tomorrow", "weekend", "next_week"};
+            int rowIdx = findRowIndexForTask(taskId);
             new OperationQueue(repository).postpone(task, newDate, targets[target]);
-            renderLocal();
+            renderLocal(rowIdx >= 0 ? rowIdx : 0, null);
             Toast.makeText(this, isOnline() ? label : label + "，联网后同步", Toast.LENGTH_SHORT).show();
             syncInBackground(false);
         } catch (Exception e) {

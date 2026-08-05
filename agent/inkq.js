@@ -55,6 +55,7 @@ Add / patch options:
   --priority <normal|high>
   --status <todo|done|archived>
   --source <agent|device|imported>
+  --force              allow due-only patch on chronic_postpone tasks
 
 Global:
   --base-url <url>     default ${DEFAULT_BASE}
@@ -124,8 +125,43 @@ async function cmdContext(cfg) {
   const res = await apiContext(cfg);
   if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
   if (res.status !== 200) fail(2, 'context_failed', { status: res.status, body: res.json });
-  const note = res.json && res.json.suggestion && res.json.suggestion.note;
-  emit({ ok: true, context: res.json }, note ? `suggestion: ${note}` : 'context ok');
+
+  // Hard rule surface: pull recent signals and attach chronic_postpone list.
+  let chronic = [];
+  try {
+    const ev = await apiEvents(cfg, { limit: 80 });
+    if (ev.status === 200 && ev.json && Array.isArray(ev.json.signals)) {
+      chronic = ev.json.signals.filter((s) => s && s.kind === 'chronic_postpone');
+    }
+  } catch (_) {
+    // non-fatal — context still useful without signals
+  }
+
+  const ctx = res.json || {};
+  const out = {
+    ok: true,
+    context: ctx,
+    chronic_postpone: chronic,
+    rules: {
+      chronic:
+        '禁止只改 due / 再 postpone；拆分、降级 later、或问用户是否取消',
+      today_cap: '今日 open 体感 3–5；suggestion 提示过载时勿再堆今天'
+    }
+  };
+  const note = ctx.suggestion && ctx.suggestion.note;
+  const hints = [];
+  if (note) hints.push(`suggestion: ${note}`);
+  if (chronic.length) {
+    hints.push(
+      `chronic_postpone=${chronic.length} — ` +
+        chronic
+          .map((c) => c.title || c.task_id)
+          .slice(0, 3)
+          .join(' / ')
+    );
+    hints.push('规则: 禁止只改 due');
+  }
+  emit(out, hints.length ? hints.join('\n') : 'context ok');
 }
 
 function filterTasks(tasks, flags) {
@@ -208,11 +244,42 @@ async function cmdPatch(cfg, id, flags) {
   if (Object.keys(body).length === 0) {
     fail(1, 'nothing_to_patch', { hint: 'pass --title/--note/--due/--time/--priority/--status' });
   }
+
+  // Chronic hard rule: due-only (or due+time only) patch is forbidden.
+  const keys = Object.keys(body);
+  const dueOnly =
+    keys.every((k) => k === 'due_date' || k === 'due_time') &&
+    body.due_date !== undefined;
+  if (dueOnly && !flags.force) {
+    const chronic = await loadChronicIds(cfg);
+    if (chronic.has(id)) {
+      fail(1, 'chronic_postpone_block', {
+        id,
+        hint:
+          '该任务多次推迟。禁止只改 due。请拆分/降级(--priority)/改 note/status done，或 --force 强制。',
+        advice: '拆分、降级 later、或问用户是否取消'
+      });
+    }
+  }
+
   const res = await apiPatchTask(cfg, id, body);
   if (res.status === 404) fail(3, 'not_found', { id, body: res.json });
   if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
   if (res.status !== 200) fail(2, 'patch_failed', { status: res.status, body: res.json });
   emit({ ok: true, task: res.json.task }, `patched ${id}`);
+}
+
+async function loadChronicIds(cfg) {
+  const set = new Set();
+  try {
+    const ev = await apiEvents(cfg, { limit: 80 });
+    if (ev.status === 200 && ev.json && Array.isArray(ev.json.signals)) {
+      for (const s of ev.json.signals) {
+        if (s && s.kind === 'chronic_postpone' && s.task_id) set.add(s.task_id);
+      }
+    }
+  } catch (_) {}
+  return set;
 }
 
 async function cmdEvents(cfg, flags) {

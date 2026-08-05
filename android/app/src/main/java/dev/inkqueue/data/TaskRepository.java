@@ -63,6 +63,31 @@ public class TaskRepository {
         }
     }
 
+    /**
+     * Tasks completed on product day {@code todayDate} (Asia/Shanghai date string).
+     * Matches completed_at prefix YYYY-MM-DD or due_date == today with status done.
+     */
+    public List<Task> getCompletedToday(String todayDate) {
+        if (todayDate == null || todayDate.length() == 0) {
+            return new ArrayList<Task>();
+        }
+        SQLiteDatabase db = helper.getReadableDatabase();
+        // completed_at is ISO8601 with offset; date prefix is first 10 chars.
+        Cursor cursor = db.query(
+                "tasks", null,
+                "status = ? AND (completed_at LIKE ? OR (due_date = ? AND completed_at IS NOT NULL))",
+                new String[]{Task.STATUS_DONE, todayDate + "%", todayDate},
+                null, null,
+                "completed_at DESC, title ASC");
+        try {
+            List<Task> out = new ArrayList<Task>();
+            while (cursor.moveToNext()) out.add(taskFromCursor(cursor));
+            return out;
+        } finally {
+            cursor.close();
+        }
+    }
+
     public Task getTaskById(String id) {
         SQLiteDatabase db = helper.getReadableDatabase();
         Cursor cursor = db.query("tasks", null, "id=?", new String[]{id}, null, null, null);

@@ -12,15 +12,26 @@ public final class SectionedTaskList {
     public final List<Task> today;
     public final List<Task> week;
     public final List<Task> later;
+    /** Completed today — shown on PAGE_DONE only; never mixed into open pages. */
+    public final List<Task> doneToday;
 
     public SectionedTaskList(List<Task> overdue, List<Task> today, List<Task> week, List<Task> later) {
+        this(overdue, today, week, later, new ArrayList<Task>());
+    }
+
+    public SectionedTaskList(List<Task> overdue, List<Task> today, List<Task> week, List<Task> later, List<Task> doneToday) {
         this.overdue = overdue;
         this.today = today;
         this.week = week;
         this.later = later;
+        this.doneToday = doneToday == null ? new ArrayList<Task>() : doneToday;
     }
 
     public static SectionedTaskList group(List<Task> tasks, String todayDate) {
+        return group(tasks, todayDate, null);
+    }
+
+    public static SectionedTaskList group(List<Task> tasks, String todayDate, List<Task> doneToday) {
         List<Task> overdue = new ArrayList<Task>();
         List<Task> today = new ArrayList<Task>();
         List<Task> week = new ArrayList<Task>();
@@ -45,7 +56,8 @@ public final class SectionedTaskList {
         sort(today, todayDate);
         sort(week, todayDate);
         sort(later, todayDate);
-        return new SectionedTaskList(overdue, today, week, later);
+        List<Task> done = doneToday == null ? new ArrayList<Task>() : new ArrayList<Task>(doneToday);
+        return new SectionedTaskList(overdue, today, week, later, done);
     }
 
     public List<Row> toRows(String todayDate) {
@@ -96,6 +108,14 @@ public final class SectionedTaskList {
                 if (later.isEmpty()) rows.add(Row.empty("没有以后的任务。"));
                 else for (Task t : later) rows.add(Row.task(t, meta(t, todayDate)));
                 return rows;
+            case PAGE_DONE:
+                rows.add(Row.section("今日已做"));
+                if (doneToday == null || doneToday.isEmpty()) {
+                    rows.add(Row.empty("今天还没有完成的任务。"));
+                } else {
+                    for (Task t : doneToday) rows.add(Row.task(t, doneMeta(t, todayDate)));
+                }
+                return rows;
         }
         return rows;
     }
@@ -103,11 +123,13 @@ public final class SectionedTaskList {
     public static final int ACTION_POSTPONE_TO_TODAY = 1;
     public static final int ACTION_POSTPONE_TO_TOMORROW = 2;
 
-    public static int pageCount() { return 4; }
+    public static int pageCount() { return 5; }
     public static final int PAGE_OVERDUE = 0;
     public static final int PAGE_TODAY = 1;
     public static final int PAGE_WEEK = 2;
     public static final int PAGE_LATER = 3;
+    /** Archive of tasks completed today — read-only feel on the list. */
+    public static final int PAGE_DONE = 4;
 
     private String todayEmptyMessage() { return "今天没有任务。可以让 Agent 帮你安排下一步。"; }
     private String todayDoneMessage() { return "今天的事做完了。"; }
@@ -128,6 +150,18 @@ public final class SectionedTaskList {
         if (!DateUtils.isEmpty(due)) {
             if (meta.length() > 0) meta.append(" \u00B7 ");
             meta.append(due);
+        }
+        return meta.toString();
+    }
+
+    private static String doneMeta(Task task, String todayDate) {
+        StringBuilder meta = new StringBuilder();
+        meta.append("已完成");
+        if (task.completedAt != null && task.completedAt.length() >= 16) {
+            meta.append(" \u00B7 ").append(task.completedAt.substring(11, 16));
+        }
+        if (task.project != null && task.project.length() > 0) {
+            meta.append(" \u00B7 ").append(task.project);
         }
         return meta.toString();
     }
