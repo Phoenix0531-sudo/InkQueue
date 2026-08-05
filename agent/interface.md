@@ -94,7 +94,7 @@ node agent/inkq.js patch triage --cap 4    # 自定义今日上限（默认 5）
 
 - 读 `context` + `chronic_postpone` 信号。
 - 今日 open 超过 cap（默认 5）：溢出部分推迟到本周六（保留 due_time）。
-- chronic_postpone 任务：建议推迟到下周一（`--apply` 时带 `force`）。今日有压力时改为「问用户是否取消」。
+- **chronic_postpone 任务：dry-run 和 `--apply` 都只建议「问用户是否取消/拆分」**，**不自动推迟**（硬规则：禁止只改 due 糊弄 chronic）。要强制推迟到下周一需显式 `--apply --force-chronic`。
 - dry-run 只输出 plan，不真改；`--apply` 才 patch。
 
 ## 对用户怎么说话

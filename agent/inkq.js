@@ -61,9 +61,12 @@ Add / patch options:
 
 Triage:
   inkq patch triage             dry-run: show plan (chronic + today overflow)
-  inkq patch triage --apply     apply patches (defer chronic to next Mon,
-                                 overflow today to this weekend)
+  inkq patch triage --apply     apply patches (overflow today to this weekend)
+  inkq patch triage --apply --force-chronic  ALSO defer chronic to next Mon
   inkq patch triage --cap <N>   override today cap (default 5)
+
+  chronic tasks are NEVER auto-deferred by default (hard rule: ask user
+  cancel/split). --force-chronic overrides but still needs server --force.
 
 Global:
   --base-url <url>     default ${DEFAULT_BASE}
@@ -340,22 +343,26 @@ async function cmdTriage(cfg, flags) {
   const overflow = Math.max(0, todayOpen - CAP);
   const plan = { chronic: chronic.length, today_open: todayOpen, cap: CAP, overflow, actions: [] };
 
-  // 3) Chronic tasks: suggest defer-to-late-week (nextMon) or cancel. --apply patches them.
+  // 3) Chronic tasks: per hard rule, NEVER auto-defer (that's "只改 due 糊弄").
+  //    Always suggest ask_user_cancel; --apply refuses to patch chronic
+  //    unless caller passes --force-chronic (the chronic_block guard at
+  //    server side already enforces force for due-only patches).
   const today = new Date();
   const nextMon = fmtDateOffset(today, nextMondayDelta(today));
   for (const s of chronic) {
     plan.actions.push({
-      action: 'defer_chronic_late',
+      action: 'chronic_ask_user',
       task_id: s.task_id,
       title: s.title || null,
       reason: 'chronic_postpone',
-      new_due_date: nextMon,
-      submitter: s.submitter || null,
-      suggest: chronic.length > 0 && hopeDeferredChronic(overflow, chronic.length)
-        ? 'defer_to_next_mon'
-        : 'ask_user_cancel'
+      postpone_count_window: s.postpone_count_window || null,
+      last_at: s.last_at || null,
+      suggest: 'ask_user_cancel_or_split',
+      // never auto-apply; shown for reference if user decides to defer
+      deferred_due_date_if_forced: nextMon
     });
   }
+  const forceChronic = flags['force-chronic'] === 'true' || flags['force-chronic'] === true;
 
   // 4) Overflow today tasks (non-chronic): defer to this weekend.
   const snapRes = await apiSnapshot(cfg).catch((e) => ({ status: 0, json: null, err: e }));
@@ -386,10 +393,41 @@ async function cmdTriage(cfg, flags) {
   }
 
   const results = [];
+  let skippedChronic = 0;
   for (const a of plan.actions) {
+    // chronic: never auto-apply (hard rule). Only patch if --force-chronic.
+    if (a.action === 'chronic_ask_user') {
+      if (!forceChronic) {
+        skippedChronic++;
+        results.push({
+          task_id: a.task_id,
+          ok: false,
+          skipped: true,
+          reason: 'chronic_needs_user_decision',
+          hint: '问用户是否取消/拆分；或加 --force-chronic 强制推迟到 ' + a.deferred_due_date_if_forced
+        });
+        continue;
+      }
+      // forced: patch due to nextMon with force (server chronic_block bypass)
+      try {
+        const res = await apiPatchTask(cfg, a.task_id, {
+          due_date: a.deferred_due_date_if_forced,
+          force: true
+        });
+        if (res.status !== 200) {
+          results.push({ task_id: a.task_id, ok: false, status: res.status, error: res.json });
+        } else {
+          results.push({ task_id: a.task_id, ok: true, due_date: (res.json.task || {}).due_date, forced: true });
+        }
+        continue;
+      } catch (e) {
+        results.push({ task_id: a.task_id, ok: false, error: String(e.message) });
+        continue;
+      }
+    }
+    // overflow weekend defer
     try {
       const body = { due_date: a.new_due_date };
-      if (a.action === 'defer_chronic_late') body.force = true;
       const res = await apiPatchTask(cfg, a.task_id, body);
       if (res.status !== 200) {
         results.push({ task_id: a.task_id, ok: false, status: res.status, error: res.json });
@@ -401,14 +439,10 @@ async function cmdTriage(cfg, flags) {
     }
   }
 
-  emit(
-    { ok: true, triage: plan, applied: true, results },
-    `applied ${results.filter((r) => r.ok).length}/${results.length} patch(es)`
-  );
-}
-
-function hopeDeferredChronic(overflow, chronicCount) {
-  return overflow === 0 && chronicCount > 0; // no pressure today -> push chronic to next boundary
+  const applyHint = skippedChronic
+    ? `applied ${results.filter((r) => r.ok).length}/${results.length}; ${skippedChronic} chronic skipped (ask user)`
+    : `applied ${results.filter((r) => r.ok).length}/${results.length} patch(es)`;
+  emit({ ok: true, triage: plan, applied: true, results }, applyHint);
 }
 
 function fmtDateOffset(base, dayDelta) {
