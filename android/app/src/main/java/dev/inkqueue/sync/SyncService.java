@@ -93,11 +93,11 @@ public class SyncService {
             return r;
         }
 
-        // Drop ops that already hit the retry ceiling so they cannot block the queue forever.
-        int dropped = repository.dropPendingOverRetryLimit(MAX_OP_RETRY);
-        if (dropped > 0) {
-            Log.w(TAG, "dropped " + dropped + " pending ops over retry limit " + MAX_OP_RETRY);
-        }
+        // Drop dead-letter pending ops so they cannot block the queue forever.
+                int dropped = repository.dropDeadPendingOperations(MAX_OP_RETRY);
+                if (dropped > 0) {
+                    Log.w(TAG, "dropped " + dropped + " dead pending ops (retry>=" + MAX_OP_RETRY + " or corrupt)");
+                }
 
         int opsAttempted = 0;
         int opsAccepted = 0;

@@ -307,6 +307,25 @@ public class TaskRepository {
                 new String[]{String.valueOf(maxRetry)});
     }
 
+    /**
+     * Dead-letter cleanup for offline queue:
+     * - retry_count &gt;= maxRetry
+     * - missing/empty type or task_id (corrupt rows that can never upload)
+     * Returns total rows dropped.
+     */
+    public int dropDeadPendingOperations(int maxRetry) {
+        SQLiteDatabase db = helper.getWritableDatabase();
+        int over = db.delete(
+                "pending_operations",
+                "retry_count >= ?",
+                new String[]{String.valueOf(maxRetry)});
+        int corrupt = db.delete(
+                "pending_operations",
+                "type IS NULL OR type = '' OR task_id IS NULL OR task_id = ''",
+                null);
+        return over + corrupt;
+    }
+
     public void recordOperationError(String id, String error) {
         helper.getWritableDatabase().execSQL(
                 "UPDATE pending_operations SET retry_count = retry_count + 1, last_error = ? WHERE id = ?",

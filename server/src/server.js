@@ -16,6 +16,13 @@ const CONFIG_FILE = process.env.INKQUEUE_CONFIG_FILE || path.join(__dirname, '..
 const VALID_STATUSES = new Set(['todo', 'done', 'archived']);
 const VALID_PRIORITIES = new Set(['normal', 'high']);
 const MAX_WEBHOOK_ITEMS = 50;
+/** Keep at most this many applied device operations (idempotency + events). */
+const MAX_OPERATIONS_RETAINED = Number(process.env.INKQUEUE_MAX_OPERATIONS || 500);
+/** Drop applied operations older than this many days (default 30). 0 = keep all ages until max count. */
+const OPERATIONS_TTL_DAYS = Number(process.env.INKQUEUE_OPERATIONS_TTL_DAYS || 30);
+/** Optional TLS: set both paths to serve HTTPS (production reverse-proxy still preferred). */
+const TLS_KEY_PATH = process.env.INKQUEUE_TLS_KEY || '';
+const TLS_CERT_PATH = process.env.INKQUEUE_TLS_CERT || '';
 
 let usageCache = { data: null, timestamp: 0 };
 const USAGE_CACHE_TTL = 8000;
@@ -608,15 +615,48 @@ function hasAppliedOperation(store, operationId) {
   return operationStore(store).some((item) => item.id === operationId);
 }
 
-function rememberOperation(store, operationId, taskId, serverTime, opType, payload, taskTitle) {
+/**
+ * Prune applied operation log (idempotency ring + event stream source).
+ * - drops entries missing id
+ * - drops entries older than OPERATIONS_TTL_DAYS (if > 0)
+ * - keeps newest MAX_OPERATIONS_RETAINED
+ * Returns number of removed entries.
+ */
+function pruneOperations(store, nowMs = Date.now()) {
+  const ops = operationStore(store);
+  const before = ops.length;
+  const ttlMs = OPERATIONS_TTL_DAYS > 0 ? OPERATIONS_TTL_DAYS * 24 * 60 * 60 * 1000 : 0;
+  const kept = [];
+  for (const op of ops) {
+    if (!op || typeof op !== 'object' || !op.id) continue;
+    // Legacy incomplete records (pre-type field) are dead weight for events/idempotency.
+    if (!op.type) continue;
+    const at = op.applied_at || op.occurred_at || null;
+    if (ttlMs > 0 && at) {
+      const t = Date.parse(at);
+      if (Number.isFinite(t) && (nowMs - t) > ttlMs) continue;
+    }
+    kept.push(op);
+  }
+  kept.sort((a, b) => String(a.applied_at || '').localeCompare(String(b.applied_at || '')));
+  const trimmed = kept.length > MAX_OPERATIONS_RETAINED
+    ? kept.slice(kept.length - MAX_OPERATIONS_RETAINED)
+    : kept;
+  store.operations = trimmed;
+  return before - trimmed.length;
+}
+
+function rememberOperation(store, operationId, taskId, serverTime, opType, payload, taskTitle, deviceId) {
   operationStore(store).push({
     id: operationId,
     task_id: taskId,
     task_title: taskTitle || null,
     type: opType || null,
     payload: payload || null,
-    applied_at: serverTime
+    applied_at: serverTime,
+    device_id: deviceId || null
   });
+  // Prune is owned by the operations handler so response.pruned is accurate.
 }
 
 // Agent-facing event stream: externalised view of operations.
@@ -1023,6 +1063,7 @@ async function handleRequest(req, res) {
   if (req.method === 'POST' && url.pathname === '/v1/tasks/operations') {
     const input = await readBody(req);
     const operations = Array.isArray(input.operations) ? input.operations : [];
+    const deviceId = input && input.device_id ? String(input.device_id).slice(0, 64) : null;
     const accepted = [];
     const ignored = [];
     const errors = [];
@@ -1044,16 +1085,19 @@ async function handleRequest(req, res) {
         else if (op.type === 'postpone') { applyPostpone(task, op, serverTime); }
         else { throw new Error(`unsupported operation type: ${op.type}`); }
         rememberOperation(store, opId, String(op.task_id), serverTime,
-            op.type, op.payload || null, task.title);
+            op.type, op.payload || null, task.title, deviceId);
         accepted.push(opId);
         // P8: fire-and-forget outbound webhook to Agent (if configured)
         notifyAgentWebhook({ event_id: opId, type: op.type, task_id: String(op.task_id),
-            task_title: task.title, occurred_at: serverTime, payload: op.payload || null });
+            task_title: task.title, occurred_at: serverTime, payload: op.payload || null,
+            device_id: deviceId });
       } catch (err) { errors.push({ id: opId, error: err.message }); }
     }
 
-    if (accepted.length || ignored.length) writeStore(store);
-    sendJson(res, 200, { server_time: nowIso(), accepted, ignored, errors }); return;
+    // Always prune dead/expired ops even when body is empty (maintenance path).
+    const pruned = pruneOperations(store);
+    if (accepted.length || ignored.length || pruned > 0) writeStore(store);
+    sendJson(res, 200, { server_time: nowIso(), accepted, ignored, errors, pruned }); return;
   }
 
   if (req.method === 'POST' && url.pathname === '/v1/webhook/agent') {
@@ -1098,14 +1142,26 @@ async function handleRequest(req, res) {
   sendJson(res, 404, { error: 'not found' });
 }
 
-function createServer() {
-  return http.createServer((req, res) => {
-    handleRequest(req, res).catch((err) => {
-      if (err instanceof HttpError) { sendJson(res, err.status, { error: err.message }); return; }
-      console.error('[inkqueue-server]', err);
-      sendJson(res, 500, { error: 'server error' });
-    });
+function requestHandler(req, res) {
+  handleRequest(req, res).catch((err) => {
+    if (err instanceof HttpError) { sendJson(res, err.status, { error: err.message }); return; }
+    console.error('[inkqueue-server]', err);
+    sendJson(res, 500, { error: 'server error' });
   });
+}
+
+function createServer() {
+  if (TLS_KEY_PATH && TLS_CERT_PATH) {
+    try {
+      const key = fs.readFileSync(TLS_KEY_PATH);
+      const cert = fs.readFileSync(TLS_CERT_PATH);
+      return require('https').createServer({ key, cert }, requestHandler);
+    } catch (e) {
+      console.warn('[inkqueue-server] TLS enabled but failed to load key/cert:', e.message);
+      console.warn('[inkqueue-server] falling back to plain HTTP');
+    }
+  }
+  return http.createServer(requestHandler);
 }
 
 function start(port = DEFAULT_PORT, callback) {
@@ -1136,7 +1192,8 @@ if (require.main === module) {
   validateStartupConfig();
 
   start(DEFAULT_PORT, () => {
-    console.log(`InkQueue reference server listening on http://localhost:${DEFAULT_PORT}`);
+    const scheme = (TLS_KEY_PATH && TLS_CERT_PATH) ? 'https' : 'http';
+    console.log(`InkQueue reference server listening on ${scheme}://localhost:${DEFAULT_PORT}`);
     console.log(`Token header: X-InkQueue-Token: ${TOKEN}`);
     console.log(`Data file: ${DATA_FILE}`);
     try {
@@ -1193,5 +1250,11 @@ module.exports = {
   applyPostpone,
   publicTask,
   notifyAgentWebhook,
-  agentWebhookUrl
+  agentWebhookUrl,
+  pruneOperations,
+  rememberOperation,
+  hasAppliedOperation,
+  operationStore,
+  MAX_OPERATIONS_RETAINED,
+  OPERATIONS_TTL_DAYS
 };
