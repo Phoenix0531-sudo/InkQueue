@@ -33,6 +33,10 @@ const {
   createTask: apiCreateTask,
   patchTask: apiPatchTask,
   events: apiEvents,
+  postOperations: apiPostOperations,
+  generatedOpId,
+  resolvePostponeTarget,
+  shanghaiNowParts,
   resolveDue
 } = client;
 
@@ -46,7 +50,10 @@ Usage:
   inkq get <task_id>
   inkq add --title <text> [options]
   inkq patch <task_id> [options]
-  inkq events [--since <ISO>] [--limit <n>]
+  inkq events [--since <ISO>] [--limit <n>] [--device <id>]
+  inkq complete <task_id>
+  inkq postpone <task_id> --to tomorrow|weekend|next_week|YYYY-MM-DD
+  inkq morning
 
 Add / patch options:
   --title <text>
@@ -299,7 +306,11 @@ async function loadChronicIds(cfg) {
 }
 
 async function cmdEvents(cfg, flags) {
-  const res = await apiEvents(cfg, { since: flags.since, limit: flags.limit });
+  const res = await apiEvents(cfg, {
+    since: flags.since,
+    limit: flags.limit,
+    device: flags.device || flags.device_id
+  });
   if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
   if (res.status !== 200) fail(2, 'events_failed', { status: res.status, body: res.json });
   const events = (res.json && res.json.events) || [];
@@ -320,6 +331,127 @@ async function cmdEvents(cfg, flags) {
     },
     hintParts.join(', ')
   );
+}
+
+
+async function cmdComplete(cfg, id, flags) {
+  if (!id) fail(1, 'id_required', { hint: 'inkq complete <task_id>' });
+  const opId = generatedOpId('op_complete');
+  const res = await apiPostOperations(cfg, {
+    device_id: flags.device || flags['device-id'] || 'agent-cli',
+    operations: [{ id: opId, type: 'complete', task_id: id, payload: {} }]
+  });
+  if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
+  if (res.status !== 200) fail(2, 'complete_failed', { status: res.status, body: res.json });
+  const body = res.json || {};
+  const accepted = body.accepted || [];
+  const ignored = body.ignored || [];
+  if (!accepted.includes(opId) && ignored.includes(opId)) {
+    fail(3, 'ignored', { id, body, hint: 'task missing or archived' });
+  }
+  // Refresh task from snapshot for machine-readable result.
+  let task = null;
+  try {
+    const snap = await apiSnapshot(cfg);
+    if (snap.status === 200 && snap.json && Array.isArray(snap.json.tasks)) {
+      task = snap.json.tasks.find((t) => t && t.id === id) || null;
+    }
+  } catch (_) {}
+  emit(
+    { ok: true, id, op_id: opId, accepted, ignored, ignored_details: body.ignored_details || [], task },
+    accepted.includes(opId) ? `completed ${id}` : `complete sent ${id}`
+  );
+}
+
+async function cmdPostpone(cfg, id, flags) {
+  if (!id) fail(1, 'id_required', { hint: 'inkq postpone <task_id> --to tomorrow' });
+  const target = flags.to || flags.target || flags.due;
+  if (!target) fail(1, 'target_required', { hint: 'inkq postpone <id> --to tomorrow|weekend|next_week|YYYY-MM-DD' });
+  let dueDate;
+  try {
+    dueDate = resolvePostponeTarget(target);
+  } catch (err) {
+    fail(1, 'bad_target', { message: err.message });
+  }
+  // Preserve due_time from current task if present.
+  let dueTime = flags.time || null;
+  if (dueTime === null) {
+    try {
+      const snap = await apiSnapshot(cfg);
+      if (snap.status === 200 && snap.json && Array.isArray(snap.json.tasks)) {
+        const cur = snap.json.tasks.find((t) => t && t.id === id);
+        if (cur && cur.due_time) dueTime = cur.due_time;
+      }
+    } catch (_) {}
+  }
+  const payload = { due_date: dueDate, postpone_target: String(target) };
+  if (dueTime) payload.due_time = dueTime;
+  const opId = generatedOpId('op_postpone');
+  const res = await apiPostOperations(cfg, {
+    device_id: flags.device || flags['device-id'] || 'agent-cli',
+    operations: [{ id: opId, type: 'postpone', task_id: id, payload }]
+  });
+  if (res.status === 401 || res.status === 403) fail(2, 'auth_rejected', res.json);
+  if (res.status !== 200) fail(2, 'postpone_failed', { status: res.status, body: res.json });
+  const body = res.json || {};
+  const accepted = body.accepted || [];
+  const ignored = body.ignored || [];
+  if (!accepted.includes(opId) && ignored.includes(opId)) {
+    fail(3, 'ignored', { id, body, hint: 'task missing or archived' });
+  }
+  let task = null;
+  try {
+    const snap = await apiSnapshot(cfg);
+    if (snap.status === 200 && snap.json && Array.isArray(snap.json.tasks)) {
+      task = snap.json.tasks.find((t) => t && t.id === id) || null;
+    }
+  } catch (_) {}
+  const label =
+    String(target) === 'tomorrow' ? '明天' :
+    String(target) === 'weekend' ? '周末' :
+    (String(target) === 'next_week' || String(target) === 'next-week') ? '下周' :
+    dueDate;
+  emit(
+    { ok: true, id, op_id: opId, due_date: dueDate, due_time: dueTime, accepted, ignored, task },
+    `postponed ${id} → ${label}`
+  );
+}
+
+async function cmdMorning(cfg) {
+  const ctxRes = await apiContext(cfg);
+  if (ctxRes.status === 401 || ctxRes.status === 403) fail(2, 'auth_rejected', ctxRes.json);
+  if (ctxRes.status !== 200) fail(2, 'context_failed', { status: ctxRes.status, body: ctxRes.json });
+  const snapRes = await apiSnapshot(cfg);
+  if (snapRes.status !== 200) fail(2, 'snapshot_failed', { status: snapRes.status, body: snapRes.json });
+  const today = shanghaiNowParts().date;
+  const tasks = (snapRes.json && snapRes.json.tasks) || [];
+  const open = tasks.filter((t) => t && t.status === 'todo');
+  const overdue = open.filter((t) => t.due_date && t.due_date < today);
+  const todayTasks = open.filter((t) => t.due_date === today);
+  const week = open.filter((t) => t.due_date && t.due_date > today);
+  const later = open.filter((t) => !t.due_date);
+  const brief = {
+    date: today,
+    counts: {
+      overdue: overdue.length,
+      today: todayTasks.length,
+      week: week.length,
+      later: later.length,
+      open: open.length
+    },
+    overdue: overdue.map((t) => ({ id: t.id, title: t.title, due_date: t.due_date, project: t.project || null })),
+    today: todayTasks.map((t) => ({ id: t.id, title: t.title, due_time: t.due_time || null, project: t.project || null, priority: t.priority || 'normal' })),
+    context: ctxRes.json || null,
+    suggestion:
+      overdue.length > 0
+        ? '先处理过期，或 bulk 推迟到今天/明天'
+        : todayTasks.length === 0
+          ? '今日空；可从本周/以后抽 1–2 条，或让 Agent 安排'
+          : todayTasks.length > 5
+            ? '今日偏多；考虑 triage 或 postpone 溢出'
+            : '按今日列表推进即可'
+  };
+  emit({ ok: true, morning: brief }, `morning ${today}: overdue=${overdue.length} today=${todayTasks.length}`);
 }
 
 async function cmdTriage(cfg, flags) {
@@ -380,6 +512,15 @@ async function main() {
         break;
       case 'events':
         await cmdEvents(cfg, parsed.flags);
+        break;
+      case 'complete':
+        await cmdComplete(cfg, arg1, parsed.flags);
+        break;
+      case 'postpone':
+        await cmdPostpone(cfg, arg1, parsed.flags);
+        break;
+      case 'morning':
+        await cmdMorning(cfg);
         break;
       default:
         fail(1, 'unknown_command', { cmd, hint: 'inkq --help' });

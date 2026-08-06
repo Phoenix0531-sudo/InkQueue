@@ -90,7 +90,19 @@ public class SyncClient {
             result.httpStatus = code;
             result.serverTime = json.optString("server_time", null);
             readStringArray(json.optJSONArray("accepted"), result.accepted);
-            readStringArray(json.optJSONArray("ignored"), result.ignored);
+            readIdArray(json.optJSONArray("ignored"), result.ignored);
+            // optional rich reasons for logs (v0.9.3+)
+            JSONArray details = json.optJSONArray("ignored_details");
+            if (details != null) {
+                for (int i = 0; i < details.length(); i++) {
+                    JSONObject d = details.optJSONObject(i);
+                    if (d != null) {
+                        Log.i(TAG, "ignored op " + d.optString("id", "?")
+                                + " reason=" + d.optString("reason", "")
+                                + " msg=" + d.optString("message", ""));
+                    }
+                }
+            }
             JSONArray errors = json.optJSONArray("errors");
             if (errors != null) {
                 for (int i = 0; i < errors.length(); i++) {
@@ -149,5 +161,20 @@ public class SyncClient {
     private static void readStringArray(JSONArray array, List<String> out) {
         if (array == null) return;
         for (int i = 0; i < array.length(); i++) out.add(array.optString(i));
+    }
+
+    /** Accept ignored as ["id"] or [{id,reason,message}]. Always emit string ids. */
+    private static void readIdArray(JSONArray array, List<String> out) {
+        if (array == null) return;
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject obj = array.optJSONObject(i);
+            if (obj != null) {
+                String id = obj.optString("id", "");
+                if (id != null && id.length() > 0) out.add(id);
+            } else {
+                String id = array.optString(i);
+                if (id != null && id.length() > 0) out.add(id);
+            }
+        }
     }
 }

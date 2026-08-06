@@ -199,8 +199,48 @@ async function events(cfg, opts) {
   const q = new URLSearchParams();
   if (opts.since) q.set('since', opts.since);
   if (opts.limit) q.set('limit', String(opts.limit));
+  if (opts.device || opts.device_id) q.set('device_id', String(opts.device || opts.device_id));
   const qs = q.toString();
   return request(cfg, 'GET', '/v1/events' + (qs ? `?${qs}` : ''));
+}
+
+/** Post device-style operations (complete/postpone). Agent CLI uses this for complete/postpone. */
+async function postOperations(cfg, body) {
+  body = body || {};
+  return request(cfg, 'POST', '/v1/tasks/operations', {
+    device_id: body.device_id || body.device || 'agent-cli',
+    operations: Array.isArray(body.operations) ? body.operations : []
+  });
+}
+
+function generatedOpId(prefix) {
+  return (prefix || 'op') + '_' + Date.now().toString(36) + '_' + Math.random().toString(16).slice(2, 8);
+}
+
+/** Resolve postpone target date using product rules (Mon week start, weekend=Sat). */
+function resolvePostponeTarget(target, fromYmd) {
+  const today = fromYmd || shanghaiNowParts().date;
+  const t = String(target || '').toLowerCase();
+  if (t === 'tomorrow') return addDaysYmd(today, 1);
+  if (t === 'weekend') {
+    const [y, m, d] = today.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const dow = dt.getUTCDay(); // 0 Sun .. 6 Sat
+    let delta;
+    if (dow === 0) delta = 6;
+    else if (dow === 6) delta = 7;
+    else delta = 6 - dow;
+    return addDaysYmd(today, delta);
+  }
+  if (t === 'next_week' || t === 'next-week' || t === 'nextweek') {
+    const [y, m, d] = today.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const dow = dt.getUTCDay();
+    const delta = dow === 0 ? 1 : (8 - dow);
+    return addDaysYmd(today, delta);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  throw new Error('invalid postpone target (want tomorrow|weekend|next_week|YYYY-MM-DD): ' + target);
 }
 
 module.exports = {
@@ -218,6 +258,9 @@ module.exports = {
   createTask,
   patchTask,
   events,
+  postOperations,
+  generatedOpId,
+  resolvePostponeTarget,
   shanghaiNowParts,
   addDaysYmd,
   resolveDue

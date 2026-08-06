@@ -67,7 +67,7 @@ public final class SectionedTaskList {
         if (!overdue.isEmpty()) {
             appendSection(rows, "已过期", overdue, null, todayDate);
         }
-        appendSection(rows, "今日", today, allEmpty ? "没有任务。任务会由 Agent 同步到这里。" : todayEmptyMessage(), todayDate);
+        appendSection(rows, "今日", today, allEmpty ? "没有任务。\n由 Agent 同步到这里。" : todayEmptyMessage(), todayDate);
         appendSection(rows, "本周", week, null, todayDate);
         appendSection(rows, "以后", later, null, todayDate);
         return rows;
@@ -90,7 +90,7 @@ public final class SectionedTaskList {
                 boolean nothingPending = overdue.isEmpty() && today.isEmpty();
                 String emptyMsg = nothingPending
                         ? (week.isEmpty() && later.isEmpty()
-                            ? "没有任务。任务会由 Agent 同步到这里。"
+                            ? "没有任务。\n由 Agent 同步到这里。"
                             : todayDoneMessage())
                         : todayEmptyMessage();
                 rows.add(Row.section("今日"));
@@ -105,7 +105,7 @@ public final class SectionedTaskList {
                 return rows;
             case PAGE_LATER:
                 rows.add(Row.section("以后"));
-                if (later.isEmpty()) rows.add(Row.empty("没有以后的任务。"));
+                if (later.isEmpty()) rows.add(Row.empty("以后没有任务。"));
                 else for (Task t : later) rows.add(Row.task(t, meta(t, todayDate)));
                 return rows;
             case PAGE_DONE:
@@ -131,7 +131,7 @@ public final class SectionedTaskList {
     /** Archive of tasks completed today — read-only feel on the list. */
     public static final int PAGE_DONE = 4;
 
-    private String todayEmptyMessage() { return "今天没有任务。可以让 Agent 帮你安排下一步。"; }
+    private String todayEmptyMessage() { return "今天没有任务。\n可让 Agent 安排下一步。"; }
     private String todayDoneMessage() { return "今天的事做完了。"; }
 
     private static void appendSection(List<Row> rows, String title, List<Task> tasks, String emptyMessage, String todayDate) {

@@ -97,6 +97,7 @@ public class SyncService {
                 int dropped = repository.dropDeadPendingOperations(MAX_OP_RETRY);
                 if (dropped > 0) {
                     Log.w(TAG, "dropped " + dropped + " dead pending ops (retry>=" + MAX_OP_RETRY + " or corrupt)");
+                    repository.setLastSyncError("有 " + dropped + " 条死信已清理");
                 }
 
         int opsAttempted = 0;
@@ -198,6 +199,9 @@ public class SyncService {
         String base = DateUtils.displayLastSync(syncTime);
         if (opsAccepted > 0) {
             base = base + " · 上传 " + opsAccepted + " 条";
+        }
+        if (opsIgnored > 0) {
+            base = base + " · 忽略 " + opsIgnored + " 条";
         }
         if (remaining > 0) {
             // Should be rare after a clean snapshot; surface residual failed ops.

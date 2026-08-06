@@ -466,6 +466,15 @@ public class InkMainView extends View {
     private int downRowIdx = -1;
     private boolean longPressFired = false;
     private static final long LONG_PRESS_THRESHOLD = 500; // ms
+    private final Runnable longPressRunnable = new Runnable() {
+        @Override public void run() {
+            if (!longPressFired && downRowIdx >= 0 && downRowIdx < rowTouchIdx.size()) {
+                longPressFired = true;
+                Row r = rows.get(rowTouchIdx.get(downRowIdx));
+                if (r.task != null && listener != null) listener.onTaskLongPressed(r.task.id);
+            }
+        }
+    };
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
@@ -481,25 +490,25 @@ public class InkMainView extends View {
                 for (int i = 0; i < rowTouchRects.size(); i++) {
                     if (rowTouchRects.get(i).contains(x, y)) { downRowIdx = i; break; }
                 }
-                // start a post-check for long press
-                postDelayed(new Runnable() {
-                    @Override public void run() {
-                        if (!longPressFired && downRowIdx >= 0 && downRowIdx < rowTouchIdx.size()) {
-                            longPressFired = true;
-                            Row r = rows.get(rowTouchIdx.get(downRowIdx));
-                            if (r.task != null) listener.onTaskLongPressed(r.task.id);
-                        }
-                    }
-                }, LONG_PRESS_THRESHOLD);
+                // start a post-check for long press (cancel on UP/MOVE/CANCEL)
+                removeCallbacks(longPressRunnable);
+                postDelayed(longPressRunnable, LONG_PRESS_THRESHOLD);
                 return true;
 
             case MotionEvent.ACTION_MOVE:
                 if (Math.abs(x - downX) > 20 || Math.abs(y - downY) > 20) {
                     downRowIdx = -1; // cancel long press on swipe
+                    removeCallbacks(longPressRunnable);
                 }
                 return true;
 
+            case MotionEvent.ACTION_CANCEL:
+                removeCallbacks(longPressRunnable);
+                downRowIdx = -1;
+                return true;
+
             case MotionEvent.ACTION_UP:
+                removeCallbacks(longPressRunnable);
                 if (longPressFired) return true; // long press already handled
                 long dt = SystemClock.uptimeMillis() - downTime;
                 if (dt >= LONG_PRESS_THRESHOLD) return true; // was slow tap — treat as long-press-zone

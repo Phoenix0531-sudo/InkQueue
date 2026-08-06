@@ -120,3 +120,17 @@ server 挂了：根据 `health` 失败提示用户启动 server，不要假装�
 3. Kindle 同步能看见  
 4. 用户在 Kindle 推迟后 → `inkq events` 能看到对应事件  
 5. 用户问队列 → 基于 `context`/`list`/`events` 回答
+
+
+## MCP vs CLI
+
+| 能力 | `inkq` CLI | MCP `mcp-inkqueue` |
+|------|------------|--------------------|
+| health / context / list / get | 有 | 有 |
+| add / patch（含 why、source_session） | 有 | 有 |
+| events | 有（`--device`） | 有 |
+| triage | `patch triage` | `triage` tool |
+| complete / postpone（operations） | **有** | 无（用 patch status/due 或 CLI） |
+| morning 简报 | **有** | 无（context+list 组合） |
+
+主路径仍是 **CLI**。MCP 仅在宿主只认 MCP 时使用，内部仍走 `agent/lib/client.js`，不另起 HTTP 栈。

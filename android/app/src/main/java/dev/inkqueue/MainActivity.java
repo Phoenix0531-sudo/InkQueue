@@ -300,7 +300,7 @@ public class MainActivity extends Activity implements InkMainView.Listener {
             new OperationQueue(repository).complete(task, now);
             // Reflow from that row downward — avoid full-screen invalidate.
             renderLocal(rowIdx >= 0 ? rowIdx : 0, null);
-            Toast.makeText(this, isOnline() ? "已完成" : "已完成，联网后同步", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, isOnline() ? "已完成" : "已完成。已保存，联网后同步", Toast.LENGTH_SHORT).show();
             syncInBackground(false);
         } catch (Exception e) {
             Toast.makeText(this, "操作失败", Toast.LENGTH_SHORT).show();
@@ -322,7 +322,7 @@ public class MainActivity extends Activity implements InkMainView.Listener {
             OperationQueue queue = new OperationQueue(repository);
             for (Task task : lastGrouped.overdue) queue.postpone(task, targetDate, target);
             renderLocal();
-            Toast.makeText(this, isOnline() ? label : label + "，联网后同步", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, isOnline() ? label : label + "。已保存，联网后同步", Toast.LENGTH_SHORT).show();
             syncInBackground(false);
         } catch (Exception e) {
             Toast.makeText(this, "操作失败", Toast.LENGTH_SHORT).show();
@@ -345,7 +345,7 @@ public class MainActivity extends Activity implements InkMainView.Listener {
             int rowIdx = findRowIndexForTask(taskId);
             new OperationQueue(repository).postpone(task, newDate, targets[target]);
             renderLocal(rowIdx >= 0 ? rowIdx : 0, null);
-            Toast.makeText(this, isOnline() ? label : label + "，联网后同步", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, isOnline() ? label : label + "。已保存，联网后同步", Toast.LENGTH_SHORT).show();
             syncInBackground(false);
         } catch (Exception e) {
             Toast.makeText(this, "操作失败", Toast.LENGTH_SHORT).show();

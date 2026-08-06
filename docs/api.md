@@ -8,6 +8,16 @@ X-InkQueue-Token: <INKQUEUE_TOKEN>
 
 开发环境默认 token 是 `dev-token`；生产环境必须替换为随机长 token，并使用 HTTPS。产品时区固定为 `Asia/Shanghai`（`+08:00`）。
 
+### Token 轮换（v0.9.3）
+
+- 主 token：`INKQUEUE_TOKEN`（默认开发值见环境 / 本地配置）。
+- 可选旧 token：`INKQUEUE_TOKEN_PREV`。设置后，请求头 `X-InkQueue-Token` 匹配 **主或旧** 任一即可。
+- 轮换完成后去掉 `INKQUEUE_TOKEN_PREV`。
+- `POST /v1/tasks/operations` 的 `ignored` **仍是字符串 id 数组**（兼容旧客户端）；额外返回 `ignored_details: [{ id, reason, message }]` 供日志/Agent 阅读。
+- `GET /v1/events?device_id=`（或 `?device=`）按操作记录的 `device_id` 过滤；事件对象含 `device_id` 字段。
+- 数据文件损坏时会尝试 `.bak` / `.bak.1` / `.bak.2` 自愈，并在写入时轮转备份。
+
+
 ## GET /v1/health
 
 ```bash
@@ -321,3 +331,34 @@ Server 在处理设备完成/推迟操作时，如果 `data/config.json` 配了 
 ## CLIProxyAPI 监控接口
 
 InkQueue 还提供 CPA-only 的 `/v1/usage`、`/v1/cliproxy/health`、`/v1/cliproxy/pool` 和 `/admin/cliproxy`，用于本地账号池状态展示。相关接口不会返回 access token、refresh token 或原始 id token，也不会删除 CLIProxy auth 文件。额度窗口标签必须来自 CPA 返回的 `limit_window_seconds`，不硬编码为 5 小时。
+
+
+## HTTPS 反代配方（局域网 / 生产）
+
+参考 server 本身可用 `INKQUEUE_TLS_KEY` + `INKQUEUE_TLS_CERT` 直接 HTTPS。更常见是前面挂反代：
+
+### Caddy
+
+```caddyfile
+inkqueue.example.com {
+  reverse_proxy 127.0.0.1:8787
+}
+```
+
+### nginx
+
+```nginx
+server {
+  listen 443 ssl;
+  server_name inkqueue.example.com;
+  ssl_certificate     /etc/ssl/inkqueue.crt;
+  ssl_certificate_key /etc/ssl/inkqueue.key;
+  location / {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+}
+```
+
+Kindle 端 Settings 填 `https://inkqueue.example.com`（需设备信任证书；局域网自签证书在 Android 4.4 上较麻烦，开发期可继续 HTTP）。

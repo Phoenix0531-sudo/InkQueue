@@ -11,6 +11,8 @@ const cliproxy = require('./cliproxy');
 const DEFAULT_PORT = Number(process.env.INKQUEUE_PORT || 8787);
 const DISCOVERY_PORT = Number(process.env.INKQUEUE_DISCOVERY_PORT || 48787);
 const TOKEN = process.env.INKQUEUE_TOKEN || 'dev-token';
+/** Optional previous token during rotation (accepted until removed). */
+const TOKEN_PREV = process.env.INKQUEUE_TOKEN_PREV || '';
 const DATA_FILE = process.env.INKQUEUE_DATA_FILE || path.join(__dirname, '..', 'data', 'tasks.json');
 const CONFIG_FILE = process.env.INKQUEUE_CONFIG_FILE || path.join(__dirname, '..', 'data', 'config.json');
 const VALID_STATUSES = new Set(['todo', 'done', 'archived']);
@@ -137,25 +139,94 @@ function nowIsoMinusSeconds(seconds) {
   return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}+08:00`;
 }
 
+function emptyStore() {
+  return { tasks: [], operations: [] };
+}
+
 function ensureDataFile() {
   fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
   if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ tasks: [] }, null, 2));
+    fs.writeFileSync(DATA_FILE, JSON.stringify(emptyStore(), null, 2));
   }
+}
+
+function backupPath(slot) {
+  return DATA_FILE + '.bak' + (slot ? '.' + slot : '');
+}
+
+/** Keep up to 3 rotating backups: .bak, .bak.1, .bak.2 */
+function rotateStoreBackups() {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return;
+    const b2 = backupPath(2);
+    const b1 = backupPath(1);
+    const b0 = backupPath('');
+    if (fs.existsSync(b2)) {
+      try { fs.unlinkSync(b2); } catch (_) {}
+    }
+    if (fs.existsSync(b1)) {
+      try { fs.renameSync(b1, b2); } catch (_) {}
+    }
+    if (fs.existsSync(b0)) {
+      try { fs.renameSync(b0, b1); } catch (_) {}
+    }
+    fs.copyFileSync(DATA_FILE, b0);
+  } catch (e) {
+    console.warn('[inkqueue-server] backup rotate failed:', e.message);
+  }
+}
+
+function tryLoadStoreFrom(filePath) {
+  const raw = fs.readFileSync(filePath, 'utf8');
+  if (!raw.trim()) return emptyStore();
+  const parsed = JSON.parse(raw);
+  if (Array.isArray(parsed)) return { tasks: parsed, operations: [] };
+  if (!parsed || typeof parsed !== 'object') throw new Error('store root not object');
+  if (!Array.isArray(parsed.tasks)) parsed.tasks = [];
+  if (!Array.isArray(parsed.operations)) parsed.operations = [];
+  return parsed;
 }
 
 function readStore() {
   ensureDataFile();
-  const raw = fs.readFileSync(DATA_FILE, 'utf8');
-  const parsed = raw.trim() ? JSON.parse(raw) : { tasks: [] };
-  if (Array.isArray(parsed)) return { tasks: parsed };
-  if (!Array.isArray(parsed.tasks)) parsed.tasks = [];
-  return parsed;
+  try {
+    return tryLoadStoreFrom(DATA_FILE);
+  } catch (e) {
+    console.warn('[inkqueue-server] primary store corrupt:', e.message);
+    const candidates = [backupPath(''), backupPath(1), backupPath(2)];
+    for (const c of candidates) {
+      try {
+        if (!fs.existsSync(c)) continue;
+        const recovered = tryLoadStoreFrom(c);
+        console.warn('[inkqueue-server] recovered store from', c);
+        try {
+          const tmp = DATA_FILE + '.heal';
+          fs.writeFileSync(tmp, JSON.stringify(recovered, null, 2));
+          fs.renameSync(tmp, DATA_FILE);
+        } catch (w) {
+          console.warn('[inkqueue-server] heal write failed:', w.message);
+        }
+        return recovered;
+      } catch (be) {
+        console.warn('[inkqueue-server] backup unusable', c, be.message);
+      }
+    }
+    console.warn('[inkqueue-server] no usable backup; starting empty store');
+    const fresh = emptyStore();
+    try {
+      if (fs.existsSync(DATA_FILE)) {
+        fs.copyFileSync(DATA_FILE, DATA_FILE + '.corrupt.' + Date.now());
+      }
+      fs.writeFileSync(DATA_FILE, JSON.stringify(fresh, null, 2));
+    } catch (_) {}
+    return fresh;
+  }
 }
 
 function writeStore(store) {
   ensureDataFile();
-  const tmp = `${DATA_FILE}.tmp`;
+  rotateStoreBackups();
+  const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
   fs.renameSync(tmp, DATA_FILE);
 }
@@ -509,8 +580,15 @@ function readBody(req) {
   });
 }
 
+function tokenMatches(value) {
+  if (!value) return false;
+  if (value === TOKEN) return true;
+  if (TOKEN_PREV && value === TOKEN_PREV) return true;
+  return false;
+}
+
 function hasToken(req) {
-  return req.headers['x-inkqueue-token'] === TOKEN;
+  return tokenMatches(req.headers['x-inkqueue-token']);
 }
 
 function generatedId(prefix) {
@@ -668,16 +746,21 @@ function eventFromOperation(op, task) {
     task_id: op.task_id,
     task_title: op.task_title || (task ? task.title : null),
     occurred_at: op.applied_at,
+    device_id: op.device_id || null,
     payload: op.payload || null
   };
 }
 
-function listEvents(store, sinceIso) {
+function listEvents(store, sinceIso, deviceId) {
   const ops = operationStore(store).slice().sort((a, b) => a.applied_at.localeCompare(b.applied_at));
-  const events = ops.map((op) => {
+  let events = ops.map((op) => {
     const task = store.tasks.find((t) => t.id === op.task_id);
     return eventFromOperation(op, task);
   });
+  if (deviceId) {
+    const want = String(deviceId);
+    events = events.filter((e) => e.device_id && e.device_id === want);
+  }
   if (!sinceIso) return events;
   return events.filter((e) => e.occurred_at > sinceIso);
 }
@@ -884,7 +967,7 @@ function tokenFromQuery(url) {
 }
 
 function hasTokenOrQuery(req, url) {
-  return hasToken(req) || tokenFromQuery(url) === TOKEN;
+  return hasToken(req) || tokenMatches(tokenFromQuery(url));
 }
 
 async function handleRequest(req, res) {
@@ -964,14 +1047,21 @@ async function handleRequest(req, res) {
   if (req.method === 'GET' && url.pathname === '/v1/events') {
     const store = readStore();
     const since = url.searchParams.get('since') || '';
+    const deviceFilter = url.searchParams.get('device_id') || url.searchParams.get('device') || '';
     const limitParam = Number(url.searchParams.get('limit') || 0);
-    let events = listEvents(store, since);
+    let events = listEvents(store, since, deviceFilter || null);
     if (limitParam > 0 && events.length > limitParam) {
       events = events.slice(events.length - limitParam);
     }
     const latest = events.length ? events[events.length - 1].occurred_at : null;
     const signals = deriveSignals(events);
-    sendJson(res, 200, { server_time: nowIso(), events, signals, latest_event_at: latest }); return;
+    sendJson(res, 200, {
+      server_time: nowIso(),
+      events,
+      signals,
+      latest_event_at: latest,
+      device_id: deviceFilter || null
+    }); return;
   }
 
   // Agent scheduling context: helps an Agent decide how many tasks / what cadence to push.
@@ -1066,6 +1156,7 @@ async function handleRequest(req, res) {
     const deviceId = input && input.device_id ? String(input.device_id).slice(0, 64) : null;
     const accepted = [];
     const ignored = [];
+    const ignoredDetails = [];
     const errors = [];
     const store = readStore();
 
@@ -1080,7 +1171,16 @@ async function handleRequest(req, res) {
           continue;
         }
         const task = store.tasks.find((item) => item.id === op.task_id);
-        if (!task || task.status === 'archived') { ignored.push(opId); continue; }
+        if (!task) {
+          ignored.push(opId);
+          ignoredDetails.push({ id: opId, reason: 'task_not_found', message: '任务不存在，已忽略' });
+          continue;
+        }
+        if (task.status === 'archived') {
+          ignored.push(opId);
+          ignoredDetails.push({ id: opId, reason: 'task_archived', message: '任务已归档，已忽略' });
+          continue;
+        }
         if (op.type === 'complete') { applyComplete(task, op, serverTime); }
         else if (op.type === 'postpone') { applyPostpone(task, op, serverTime); }
         else { throw new Error(`unsupported operation type: ${op.type}`); }
@@ -1097,7 +1197,7 @@ async function handleRequest(req, res) {
     // Always prune dead/expired ops even when body is empty (maintenance path).
     const pruned = pruneOperations(store);
     if (accepted.length || ignored.length || pruned > 0) writeStore(store);
-    sendJson(res, 200, { server_time: nowIso(), accepted, ignored, errors, pruned }); return;
+    sendJson(res, 200, { server_time: nowIso(), accepted, ignored, ignored_details: ignoredDetails, errors, pruned }); return;
   }
 
   if (req.method === 'POST' && url.pathname === '/v1/webhook/agent') {
@@ -1190,6 +1290,12 @@ function validateStartupConfig(configFile = CONFIG_FILE, logger = console) {
 
 if (require.main === module) {
   validateStartupConfig();
+  try {
+    readStore();
+    rotateStoreBackups();
+  } catch (e) {
+    console.warn('[inkqueue-server] startup store check failed:', e.message);
+  }
 
   start(DEFAULT_PORT, () => {
     const scheme = (TLS_KEY_PATH && TLS_CERT_PATH) ? 'https' : 'http';
@@ -1254,6 +1360,9 @@ module.exports = {
   pruneOperations,
   rememberOperation,
   hasAppliedOperation,
+  tokenMatches,
+  TOKEN_PREV,
+  rotateStoreBackups,
   operationStore,
   MAX_OPERATIONS_RETAINED,
   OPERATIONS_TTL_DAYS
