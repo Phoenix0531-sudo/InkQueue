@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="280" viewBox="0 0 1200 280" role="img" aria-labelledby="title desc">
+  <title id="title">B1 closed-loop verification</title>
+  <desc id="desc">Device complete, server accepts, Agent patches title, snapshot keeps status done while title updates.</desc>
+
+  <rect width="1200" height="280" rx="18" fill="#FFFFFF" stroke="#000000" stroke-width="2"/>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" fill="#000000">
+    <text x="48" y="48" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="2">PROOF · 2026-08-05 · KINDLE PW3</text>
+    <text x="48" y="88" font-size="32" font-weight="700">B1 closed loop on real hardware</text>
+  </g>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif">
+    <rect x="48" y="120" width="250" height="110" rx="10" fill="#FFFFFF" stroke="#000000" stroke-width="2"/>
+    <text x="68" y="154" font-size="18" font-weight="700" fill="#000000">1 Complete</text>
+    <text x="68" y="184" font-size="15" fill="#333333">Kindle marks done</text>
+    <text x="68" y="208" font-size="14" fill="#000000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">op_b1_… accepted</text>
+
+    <rect x="332" y="120" width="250" height="110" rx="10" fill="#FFFFFF" stroke="#000000" stroke-width="2"/>
+    <text x="352" y="154" font-size="18" font-weight="700" fill="#000000">2 Sync</text>
+    <text x="352" y="184" font-size="15" fill="#333333">POST /operations 200</text>
+    <text x="352" y="208" font-size="14" fill="#000000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">已同步 21:23 · 上传 1</text>
+
+    <rect x="616" y="120" width="250" height="110" rx="10" fill="#FFFFFF" stroke="#000000" stroke-width="2"/>
+    <text x="636" y="154" font-size="18" font-weight="700" fill="#000000">3 Agent edit</text>
+    <text x="636" y="184" font-size="15" fill="#333333">inkq patch --title</text>
+    <text x="636" y="208" font-size="14" fill="#000000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">status stays done</text>
+
+    <rect x="900" y="120" width="250" height="110" rx="10" fill="#FFFFFF" stroke="#000000" stroke-width="2"/>
+    <text x="920" y="154" font-size="18" font-weight="700" fill="#000000">4 Snapshot</text>
+    <text x="920" y="184" font-size="15" fill="#333333">title updated</text>
+    <text x="920" y="208" font-size="14" fill="#000000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">done not overwritten</text>
+  </g>
+</svg>
