@@ -11,7 +11,7 @@
     <text x="72" y="78" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="3">E-INK · ANDROID 4.4 · minSdk 19</text>
     <text x="72" y="148" font-size="72" font-weight="700">InkQueue</text>
     <text x="72" y="196" font-size="26">Agent writes the queue. Kindle executes it.</text>
-    <text x="72" y="238" font-size="18" fill="#333333">Native Java · Canvas self-draw · ~96 KB APK · zero AndroidX</text>
+    <text x="72" y="238" font-size="18" fill="#333333">Native Java · Canvas self-draw · ~55 KB APK · zero AndroidX</text>
 
     <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
       <text x="72" y="292">v0.9.2</text>

@@ -1,21 +1,21 @@
 # InkQueue
 
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="InkQueue — Agent writes the queue. Kindle executes it. E-ink Android 4.4, minSdk 19, ~96 KB APK.">
+  <img src="./assets/readme/hero.svg" width="100%" alt="InkQueue — Agent writes the queue. Kindle executes it. E-ink Android 4.4, minSdk 19, ~55 KB APK.">
 </p>
 
 <p align="center">
-  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.2 · minSdk 19 · ~96 KB APK · 32 server tests · 16 triage tests · B1 on real PW3">
+  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.2 · minSdk 19 · ~55 KB APK · 32 server tests · 16 triage tests · B1 on real PW3">
 </p>
 
 **Agent-synced task queue for e-ink devices.**
 
-The Agent creates and maintains tasks through conversation. The Kindle only views, completes, and postpones. No Material chrome, no WebView shell, no heavy framework — a quiet terminal for Paperwhite 3.
+Agent writes the queue in conversation. Kindle only views, completes, and postpones — a quiet terminal for Paperwhite 3, not a Material todo app.
 
 | | |
 |---|---|
 | **Device** | Kindle Paperwhite 3 · Android 4.4.2 · KOSP/CracKDroid · 6″ e-ink · ~512 MB |
-| **Client** | Native Java · Canvas self-draw · minSdk 19 · zero AndroidX · ~96 KB APK |
+| **Client** | Native Java · Canvas self-draw · minSdk 19 · zero AndroidX · ~55 KB APK |
 | **Server** | Node reference API on port `8787` · JSON file store · optional TLS |
 | **Agent path** | `node agent/inkq.js` + [`agent/interface.md`](agent/interface.md) · MCP optional |
 | **Status** | **v0.9.2** · 32 server + 16 triage tests · B1 closed-loop verified on real PW3 |
@@ -29,20 +29,32 @@ Home-screen name on device: **任务**.
 </p>
 
 <p align="center">
-  <img src="./docs/screenshots/show-main.png" width="24%" alt="Kindle home — 任务 list, today tab">
+  <img src="./docs/screenshots/show-main.png" width="30%" alt="Kindle home — 任务 list, today tab">
   &nbsp;
-  <img src="./docs/screenshots/show-week.png" width="24%" alt="Kindle week tab">
+  <img src="./docs/screenshots/show-detail2.png" width="30%" alt="Kindle detail — complete and postpone">
   &nbsp;
-  <img src="./docs/screenshots/show-detail2.png" width="24%" alt="Kindle detail — complete and postpone">
-  &nbsp;
-  <img src="./docs/screenshots/v082-11-final.png" width="24%" alt="Kindle after sync — quiet e-ink layout">
+  <img src="./docs/screenshots/v082-11-final.png" width="30%" alt="Kindle after sync — quiet e-ink layout">
 </p>
+
+<p align="center"><sub>Home · Detail · After sync — real captures on Kindle Paperwhite 3 (KOSP)</sub></p>
+
+<p align="center">
+  <img src="./docs/screenshots/show-week.png" width="22%" alt="Kindle week tab">
+  &nbsp;
+  <img src="./docs/screenshots/v082-03-detail.png" width="22%" alt="Detail actions — complete / postpone">
+  &nbsp;
+  <img src="./docs/screenshots/e2e-05-annotated.png" width="22%" alt="Annotated e2e board">
+  &nbsp;
+  <img src="./docs/screenshots/e2e-20-final.png" width="22%" alt="E2E final state">
+</p>
+
+<p align="center"><sub>Week tab · Action sheet · Annotated e2e · Final state</sub></p>
 
 <p align="center">
   <img src="./assets/readme/flow-b1.svg" width="100%" alt="B1 closed loop: complete → sync → Agent patch title → snapshot keeps status done">
 </p>
 
-**B1 closed loop (2026-08-05, Kindle PW3)** — conflict v2 under real hardware:
+**B1 closed loop · 2026-08-05 · Kindle PW3** — conflict v2 on real hardware:
 
 > Device owns lifecycle (`status` / `due_*` / `completed_at`). Agent owns text (`title` / `note` / `why`). Completing on device, then patching title from the Agent, must keep `status=done`.
 
@@ -104,7 +116,7 @@ InkQueue is **not** a general todo app. It is an **execution surface** for tasks
 | Storage | `SQLiteOpenHelper` + `SharedPreferences` |
 | Dependencies | **No AndroidX / AppCompat / Material** |
 
-Result: cold start stays snappy, APK stays ~**96 KB**, contrast stays pure black/white, touch targets stay large.
+Result: cold start stays snappy, APK stays ~**55 KB**, contrast stays pure black/white, touch targets stay large.
 
 ---
 
@@ -153,6 +165,8 @@ That split is what B1 proved on hardware: Agent text edits never resurrect a com
   <img src="./assets/readme/section-start.svg" width="100%" alt="02 First use — Quick start">
 </p>
 
+Five steps · lab defaults (`dev-token`, device `kindle-pw3`, port `8787`).
+
 ### 1. Start the server
 
 ```bash
@@ -191,7 +205,7 @@ cd android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-APK: `android/app/build/outputs/apk/debug/app-debug.apk` (~96 KB). Desktop label: **任务**.
+APK: `android/app/build/outputs/apk/debug/app-debug.apk` (~55 KB). Desktop label: **任务**.
 
 ### 4. Configure the Kindle
 
@@ -228,6 +242,8 @@ curl -s -H "X-InkQueue-Token: dev-token" http://127.0.0.1:8787/v1/tasks/snapshot
 ---
 
 ## Features (v0.9.2)
+
+Installed on device as `versionName 0.9.2` / `versionCode 92` (includes `dropDeadPendingOperations`).
 
 **Kindle**
 
@@ -320,10 +336,10 @@ Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_
 
 **Shipped**
 
-- v0.1–v0.8.2: native client, Canvas UI, offline queue, Settings design pass, ~96 KB APK
+- v0.1–v0.8.2: native client, Canvas UI, offline queue, Settings design pass, ~55 KB APK
 - v0.9.0: partial reflow, 已做 tab, chronic signals, LAN discovery, Windows logon install
 - v0.9.1: conflict v2, `why`/`source_session`, triage, webhook envelope, MCP triage tool
-- **v0.9.2**: dead-op prune both sides, `device_id` audit, optional TLS, B1 closed-loop docs, README redesign
+- **v0.9.2**: dead-op prune both sides, `device_id` audit, optional TLS, B1 closed-loop docs, README redesign, device reinstall verified (`versionCode 92`)
 
 **Not in scope (separate products)**
 

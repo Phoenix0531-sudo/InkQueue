@@ -27,7 +27,7 @@
     <text x="856" y="158" font-size="22" font-weight="700" fill="#000000">3 · Kindle</text>
     <text x="856" y="192" font-size="16" fill="#333333">view · complete · postpone</text>
     <text x="856" y="220" font-size="16" fill="#333333">offline queue · local cache</text>
-    <text x="856" y="248" font-size="15" fill="#000000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">minSdk 19 · ~96 KB</text>
+    <text x="856" y="248" font-size="15" fill="#000000" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">minSdk 19 · ~55 KB</text>
   </g>
 
   <!-- arrows -->
