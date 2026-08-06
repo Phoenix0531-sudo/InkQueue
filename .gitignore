@@ -11,6 +11,9 @@ server/data/*.tmp
 server/data/config.json
 server/data/server.pid
 server/data/server.log
+server/data/server.err.log
+server/data/tasks.json.bak
+server/data/tasks.json.bak.*
 .tmp-cpa/
 *.log
 .DS_Store

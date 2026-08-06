@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.2 · minSdk 19 · ~55 KB APK · 32 server tests · 16 triage tests · B1 on real PW3">
+  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.4 · minSdk 19 · ~55 KB APK · 31 server tests · 19 agent tests · B1 on real PW3">
 </p>
 
 **Agent-synced task queue for e-ink devices.**
@@ -18,7 +18,7 @@ Agent writes the queue in conversation. Kindle only views, completes, and postpo
 | **Client** | Native Java · Canvas self-draw · minSdk 19 · zero AndroidX · ~55 KB APK |
 | **Server** | Node reference API on port `8787` · JSON file store · optional TLS |
 | **Agent path** | `node agent/inkq.js` + [`agent/interface.md`](agent/interface.md) · MCP optional |
-| **Status** | **v0.9.2** · 32 server + 16 triage tests · B1 closed-loop verified on real PW3 |
+| **Status** | **v0.9.4** · 31 server + 19 agent tests · B1 closed-loop verified on real PW3 |
 
 Home-screen name on device: **任务**.
 
@@ -241,9 +241,9 @@ curl -s -H "X-InkQueue-Token: dev-token" http://127.0.0.1:8787/v1/tasks/snapshot
 
 ---
 
-## Features (v0.9.2)
+## Features (v0.9.4)
 
-Installed on device as `versionName 0.9.2` / `versionCode 92` (includes `dropDeadPendingOperations`).
+Installed on device as `versionName 0.9.4` / `versionCode 94` (startup prune + `dropDeadPendingOperations`).
 
 **Kindle**
 
@@ -260,13 +260,13 @@ Installed on device as `versionName 0.9.2` / `versionCode 92` (includes `dropDea
 - `/v1/events` + derived `signals` (incl. `chronic_postpone`)
 - `/v1/agent/context` for scheduling rhythm
 - Outbound webhook envelope `inkqueue.device_event.v1`
-- Operations prune: max retain + TTL; response field `pruned`
+- Operations prune: max retain + TTL; **startup auto-prune** (`start()` cleans before serving); response field `pruned`
 - `device_id` recorded on applied ops (multi-device audit)
 - Optional HTTPS via `INKQUEUE_TLS_KEY` + `INKQUEUE_TLS_CERT`
 
 **Agent**
 
-- `inkq` CLI: health / context / list / get / add / patch / events / triage
+- `inkq` CLI: health / context / list / get / add / patch / complete / postpone / morning / events / triage
 - Chronic hard rules: due-only patch blocked unless `--force`
 - Optional `why` / `source_session` audit fields
 - Thin MCP adapter (stdio, newline-delimited JSON)
@@ -277,15 +277,15 @@ Installed on device as `versionName 0.9.2` / `versionCode 92` (includes `dropDea
 
 ```bash
 npm test                               # agent triage + server API
-cd server && npm test                  # 32/32
-node --test agent/test/*.test.js       # 16/16
+cd server && npm test                  # 31/31
+node --test agent/test/*.test.js       # 19/19
 cd android && ./gradlew testDebugUnitTest
 ```
 
 | Suite | Result |
 |---|---|
-| Server API (`server/test`) | **32/32** (prune, device_id, events, webhook, conflict paths) |
-| Agent triage (`agent/test`) | **16/16** |
+| Server API (`server/test`) | **31/31** (startup prune, TTL prune, device_id, events, webhook, conflict paths) |
+| Agent (trips + client-ops) | **19/19** (postpone targets, postOperations accepted/ignored/pruned) |
 | Android JVM unit | DateUtils / SectionedTaskList / PendingOperation / JsonUtils / SyncResult |
 | Real device B1 | PW3 complete → Agent title patch → snapshot keeps `done` |
 
@@ -306,17 +306,17 @@ InkQueue/
 
 ---
 
-## Hardening notes (v0.9.2)
+## Hardening notes (v0.9.4)
 
 | Topic | Behavior |
 |---|---|
 | Dead pending (device) | Drop ops with empty type/task_id or `retry_count` ≥ max |
-| Dead ops (server) | Drop typeless legacy rows; TTL default 30d; max retain 500 |
+| Dead ops (server) | Drop typeless legacy rows; TTL default 30d; max retain 500; **startup prune** cleans before serving |
 | Multi-device | Same token; each applied op stores `device_id` for audit |
 | TLS | Set both `INKQUEUE_TLS_KEY` and `INKQUEUE_TLS_CERT` to serve HTTPS; reverse proxy still preferred in production |
 | HTTP cleartext | Allowed for LAN lab only |
 
-Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_TOKEN`, `INKQUEUE_PORT`.
+Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_TOKEN`, `INKQUEUE_TOKEN_PREV`, `INKQUEUE_PORT`.
 
 ---
 
@@ -339,7 +339,9 @@ Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_
 - v0.1–v0.8.2: native client, Canvas UI, offline queue, Settings design pass, ~55 KB APK
 - v0.9.0: partial reflow, 已做 tab, chronic signals, LAN discovery, Windows logon install
 - v0.9.1: conflict v2, `why`/`source_session`, triage, webhook envelope, MCP triage tool
-- **v0.9.2**: dead-op prune both sides, `device_id` audit, optional TLS, B1 closed-loop docs, README redesign, device reinstall verified (`versionCode 92`)
+- v0.9.2: dead-op prune both sides, `device_id` audit, optional TLS, B1 closed-loop docs, README redesign, device reinstall verified (`versionCode 92`)
+- **v0.9.3**: token rotate (`TOKEN_PREV`), store `.bak` rotate/heal, `events --device`, `ignored_details`, CLI complete/postpone/morning, e-ink UX harden (long-press cancel, empty-state copy), (`versionCode 93`)
+- **v0.9.4**: startup auto-prune (server cleans before serving), Android parses `pruned` + masthead 「服务端清理 N 条」, TTL/startup prune tests, postOperations end-to-end test, (`versionCode 94`)
 
 **Not in scope (separate products)**
 
@@ -349,6 +351,9 @@ Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_
 
 - Vendor e-ink partial API if KOSP exposes one
 - Stronger production store (SQLite/D1) behind the same HTTP contract
+- `inkq triage` auto-patch chronic (controlled by `--force-chronic`)
+- Agent-facing webhook reverse-notify (server → Agent on device events)
+- TLS reverse-proxy production hardening proven run
 
 ---
 

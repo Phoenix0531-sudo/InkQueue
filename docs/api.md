@@ -81,11 +81,12 @@ Kindle 上传本地完成/推迟操作。服务端按照数组顺序应用，`id
 
 参考 server 在 JSON 数据文件中保留轻量 `operations` 数组作为已应用操作记录。生产后端可替换成带 TTL/唯一索引的操作表。
 
-### 死信 / 裁剪（v0.9.2）
+### 死信 / 裁剪（v0.9.4）
 
 - 响应额外字段 `pruned`：本次请求顺带清理掉的历史 operation 条数。
 - 缺 `type` / 缺 `id` 的 legacy 记录视为死信，下次 operations 请求时丢弃。
 - 默认保留最近 `INKQUEUE_MAX_OPERATIONS`（默认 500）条；超过 `INKQUEUE_OPERATIONS_TTL_DAYS`（默认 30 天）的记录也会丢。
+- **启动时主动 prune**：`start()` 读取 store 后立即调用 `pruneOperations` 并 `writeStore`，过期/typeless 死信在服务端开始接受流量前就被清理。
 - `device_id` 会写入已应用 operation 记录，便于多设备审计（仍是单 token 模型，不是多用户鉴权）。
 
 ## POST /v1/tasks

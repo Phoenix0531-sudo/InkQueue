@@ -1269,10 +1269,8 @@ function start(port = DEFAULT_PORT, callback) {
   try {
     const store = readStore();
     const pruned = pruneOperations(store);
-    if (pruned > 0) {
-      writeStore(store);
-      console.warn('[inkqueue-server] startup pruned ' + pruned + ' expired/dead operations');
-    }
+    if (pruned > 0) writeStore(store);
+    console.log('[inkqueue-server] startup prune: removed ' + pruned + ' expired/dead operations');
   } catch (e) {
     console.warn('[inkqueue-server] startup prune failed:', e.message);
   }
