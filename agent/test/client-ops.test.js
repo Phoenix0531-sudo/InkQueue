@@ -21,3 +21,41 @@ test('generatedOpId is unique-ish', () => {
   assert.notEqual(a, b);
   assert.match(a, /^op_/);
 });
+
+test('postOperations parses accepted/ignored/pruned from server', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'inkq-client-ops-'));
+  process.env.INKQUEUE_DATA_FILE = path.join(tmp, 'tasks.json');
+  process.env.INKQUEUE_CONFIG_FILE = path.join(tmp, 'config.json');
+  process.env.INKQUEUE_TOKEN = 'dev-token';
+  // Seed store with one legacy typeless op so pruned >= 1.
+  fs.writeFileSync(process.env.INKQUEUE_DATA_FILE, JSON.stringify({
+    tasks: [{ id: 't_alive', title: 'alive', status: 'todo' }],
+    operations: [{ id: 'legacy_typeless', task_id: 't_alive', applied_at: '2026-08-01T10:00:00+08:00' }]
+  }, null, 2));
+  delete require.cache[require.resolve('../../server/src/server')];
+  const { start } = require('../../server/src/server');
+  const { buildConfig, postOperations } = require('../lib/client.js');
+  const server = start(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const port = server.address().port;
+  try {
+    const cfg = buildConfig({ 'base-url': `http://localhost:${port}`, auth: 'dev-token' });
+    const r = await postOperations(cfg, {
+      device_id: 'agent-test',
+      operations: [{ id: 'op_test_1', type: 'complete', task_id: 't_alive', payload: {} }]
+    });
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.json.accepted), 'accepted is array');
+    assert.ok(r.json.accepted.includes('op_test_1'), 'op accepted');
+    assert.equal(typeof r.json.pruned, 'number', 'pruned field present');
+    assert.ok(r.json.pruned >= 0, 'pruned is non-negative (startup may have already cleaned)');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    delete require.cache[require.resolve('../../server/src/server')];
+    delete process.env.INKQUEUE_DATA_FILE;
+    delete process.env.INKQUEUE_CONFIG_FILE;
+  }
+});

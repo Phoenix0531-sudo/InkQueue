@@ -104,6 +104,7 @@ public class SyncService {
         int opsAccepted = 0;
         int opsIgnored = 0;
         int opsFailed = 0;
+        int prunedByServer = 0;
 
         List<PendingOperation> pending = repository.getPendingOperations(MAX_OP_RETRY);
         if (!pending.isEmpty()) {
@@ -130,6 +131,7 @@ public class SyncService {
                 repository.setLastSyncError(fail.userMessage);
                 return fail;
             }
+            prunedByServer = posted.prunedServer;
             for (String id : posted.accepted) {
                 repository.removePendingOperation(id);
                 opsAccepted++;
@@ -202,6 +204,11 @@ public class SyncService {
         }
         if (opsIgnored > 0) {
             base = base + " · 忽略 " + opsIgnored + " 条";
+        }
+        // v0.9.4: server-side dead-op housekeeping (TTL/max prune on operations log).
+        if (prunedByServer > 0) {
+            base = base + " · 服务端清理 " + prunedByServer + " 条";
+            Log.i(TAG, "server pruned " + prunedByServer + " expired operations during this sync");
         }
         if (remaining > 0) {
             // Should be rare after a clean snapshot; surface residual failed ops.

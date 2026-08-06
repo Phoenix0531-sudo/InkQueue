@@ -21,6 +21,8 @@ public class SyncResult {
     public int opsIgnored;
     public int opsFailed;
     public int pendingRemaining;
+    /** v0.9.4: server-side dead-op count (from POST operations `pruned`). */
+    public int prunedServer;
     public boolean snapshotFetched;
     public boolean skippedBusy;
     public boolean offline;

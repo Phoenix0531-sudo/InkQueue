@@ -104,6 +104,11 @@ public class SyncClient {
                 }
             }
             JSONArray errors = json.optJSONArray("errors");
+            // v0.9.4: server-side dead-op prune count (maintenance housekeeping).
+            result.prunedServer = json.optInt("pruned", 0);
+            if (result.prunedServer > 0) {
+                Log.i(TAG, "server pruned " + result.prunedServer + " expired/dead operations");
+            }
             if (errors != null) {
                 for (int i = 0; i < errors.length(); i++) {
                     JSONObject error = errors.optJSONObject(i);
