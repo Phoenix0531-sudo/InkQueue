@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="120" viewBox="0 0 1200 120" role="img" aria-labelledby="title desc">
+  <title id="title">Quick start</title>
+  <desc id="desc">Section header for the shortest path from clone to first sync.</desc>
+  <rect width="1200" height="120" rx="14" fill="#FFFFFF" stroke="#000000" stroke-width="2"/>
+  <rect x="40" y="34" width="6" height="52" fill="#000000"/>
+  <text x="64" y="52" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#000000" letter-spacing="3">02 · FIRST USE</text>
+  <text x="64" y="90" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif" font-size="36" font-weight="700" fill="#000000">Quick start</text>
+  <text x="860" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#333333">server · inkq · APK</text>
+</svg>

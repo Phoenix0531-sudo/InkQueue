@@ -4,6 +4,10 @@
   <img src="./assets/readme/hero.svg" width="100%" alt="InkQueue — Agent writes the queue. Kindle executes it. E-ink Android 4.4, minSdk 19, ~96 KB APK.">
 </p>
 
+<p align="center">
+  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.2 · minSdk 19 · ~96 KB APK · 32 server tests · 16 triage tests · B1 on real PW3">
+</p>
+
 **Agent-synced task queue for e-ink devices.**
 
 The Agent creates and maintains tasks through conversation. The Kindle only views, completes, and postpones. No Material chrome, no WebView shell, no heavy framework — a quiet terminal for Paperwhite 3.
@@ -12,50 +16,47 @@ The Agent creates and maintains tasks through conversation. The Kindle only view
 |---|---|
 | **Device** | Kindle Paperwhite 3 · Android 4.4.2 · KOSP/CracKDroid · 6″ e-ink · ~512 MB |
 | **Client** | Native Java · Canvas self-draw · minSdk 19 · zero AndroidX · ~96 KB APK |
-| **Server** | Node reference API on `:8787` · JSON file store · optional TLS |
+| **Server** | Node reference API on port `8787` · JSON file store · optional TLS |
 | **Agent path** | `node agent/inkq.js` + [`agent/interface.md`](agent/interface.md) · MCP optional |
 | **Status** | **v0.9.2** · 32 server + 16 triage tests · B1 closed-loop verified on real PW3 |
 
+Home-screen name on device: **任务**.
+
 ---
 
-## Proof on device
+<p align="center">
+  <img src="./assets/readme/section-proof.svg" width="100%" alt="01 Real hardware — Proof on device">
+</p>
 
 <p align="center">
-  <img src="./docs/screenshots/show-main.png" width="32%" alt="Kindle home — 任务 list, today tab">
+  <img src="./docs/screenshots/show-main.png" width="24%" alt="Kindle home — 任务 list, today tab">
   &nbsp;
-  <img src="./docs/screenshots/show-detail2.png" width="32%" alt="Kindle detail — complete and postpone actions">
+  <img src="./docs/screenshots/show-week.png" width="24%" alt="Kindle week tab">
   &nbsp;
-  <img src="./docs/screenshots/v082-11-final.png" width="32%" alt="Kindle after sync — quiet e-ink layout">
+  <img src="./docs/screenshots/show-detail2.png" width="24%" alt="Kindle detail — complete and postpone">
+  &nbsp;
+  <img src="./docs/screenshots/v082-11-final.png" width="24%" alt="Kindle after sync — quiet e-ink layout">
 </p>
 
 <p align="center">
   <img src="./assets/readme/flow-b1.svg" width="100%" alt="B1 closed loop: complete → sync → Agent patch title → snapshot keeps status done">
 </p>
 
-### B1 closed loop (2026-08-05, Kindle PW3)
+**B1 closed loop (2026-08-05, Kindle PW3)** — conflict v2 under real hardware:
 
-Conflict rule under test: **device owns lifecycle** (`status` / `due_*` / `completed_at`); **Agent owns text** (`title` / `note` / `why`). Completing on device, then patching title from the Agent, must keep `status=done`.
+> Device owns lifecycle (`status` / `due_*` / `completed_at`). Agent owns text (`title` / `note` / `why`). Completing on device, then patching title from the Agent, must keep `status=done`.
 
 | Step | Evidence |
 |---|---|
-| 1. Snapshot pull | logcat `GET …/snapshot code=200` · `已同步 21:21` |
-| 2. Device complete | local `status=done` + pending `op_b1_1785936229` type `complete` |
-| 3. Upload ops | logcat `POST …/operations ops=1 code=200` · `accepted=1` · `已同步 21:23 · 上传 1 条` |
-| 4. Server state | `status=done`, `completed_at=2026-08-05T21:23:52+08:00` (server-stamped) |
-| 5. Agent renames | `inkq patch … --title "…-Agent已改title"` |
-| 6. Device re-sync | local title updated · **`status` still `done`** · `completed_at` preserved |
+| Snapshot pull | logcat `GET …/snapshot code=200` · `已同步 21:21` |
+| Device complete | local `status=done` + pending `op_b1_1785936229` |
+| Upload ops | `POST …/operations ops=1 code=200` · `accepted=1` · `已同步 21:23 · 上传 1 条` |
+| Server state | `status=done`, `completed_at=2026-08-05T21:23:52+08:00` (server-stamped) |
+| Agent renames | `inkq patch … --title "…-Agent已改title"` |
+| Device re-sync | title updated · **`status` still `done`** · `completed_at` preserved |
 
-```bash
-# After device complete + sync — server side
-curl -s -H "X-InkQueue-Token: dev-token" \
-  http://127.0.0.1:8787/v1/tasks/snapshot | node -e "
-  let d=''; process.stdin.on('data',c=>d+=c); process.stdin.on('end',()=>{
-    const t=JSON.parse(d).tasks.find(x=>x.id==='task_msg20zyz_8c7c6d49');
-    console.log({ status:t.status, title:t.title, completed_at:t.completed_at });
-  });
-"
-# → { status: 'done', title: '…-Agent已改title', completed_at: '2026-08-05T21:23:52+08:00' }
-```
+<details>
+<summary><strong>Raw logcat + curl evidence</strong></summary>
 
 ```text
 # Device logcat (trimmed)
@@ -66,7 +67,19 @@ InkQueue SyncService: ops uploaded accepted=1
 InkQueue SyncService: performSync success=true msg=已同步 21:23 · 上传 1 条
 ```
 
-More captures live under [`docs/screenshots/`](docs/screenshots/). Annotated e2e board: [`docs/screenshots/e2e-05-annotated.png`](docs/screenshots/e2e-05-annotated.png).
+```bash
+# After device complete + Agent title patch — server side
+curl -s -H "X-InkQueue-Token: dev-token" \
+  "http://127.0.0.1:8787/v1/tasks/snapshot"
+# task_msg20zyz_8c7c6d49 →
+#   status: done
+#   title: B1真机闭环验证任务-Agent已改title
+#   completed_at: 2026-08-05T21:23:52+08:00
+```
+
+Annotated e2e board: [`docs/screenshots/e2e-05-annotated.png`](docs/screenshots/e2e-05-annotated.png) · full gallery: [`docs/screenshots/`](docs/screenshots/).
+
+</details>
 
 ---
 
@@ -80,11 +93,7 @@ InkQueue is **not** a general todo app. It is an **execution surface** for tasks
 | **Server** | Source of truth · apply device ops · stamp timestamps · emit events/webhooks |
 | **Kindle** | Cache · offline queue · complete / postpone · large black-on-white UI |
 
-Home-screen name on device: **任务**.
-
----
-
-## Why native Java (not Flutter / RN / WebView)
+### Why native Java (not Flutter / RN / WebView)
 
 | Constraint | Choice |
 |---|---|
@@ -124,15 +133,25 @@ Kindle App 「任务」       ← local SQLite + pending_operations
 4. Pull snapshot; merge without clobbering in-flight local lifecycle fields.
 5. On failure: keep cache, show a short human line — never stack traces.
 
-**Conflict v2 (field ownership)**
+---
 
-- Device: `status`, `due_date`, `due_time`, `completed_at`
-- Agent: `title`, `note`, `why`, `source_session`, `project`, `priority`
-- Server always owns final `updated_at` / `completed_at` stamps
+<p align="center">
+  <img src="./assets/readme/section-contract.svg" width="100%" alt="03 Field ownership — Contract">
+</p>
+
+| Owner | Fields |
+|---|---|
+| **Device** | `status`, `due_date`, `due_time`, `completed_at` |
+| **Agent** | `title`, `note`, `why`, `source_session`, `project`, `priority` |
+| **Server** | final `updated_at` / `completed_at` stamps · apply order · prune |
+
+That split is what B1 proved on hardware: Agent text edits never resurrect a completed task.
 
 ---
 
-## Quick start
+<p align="center">
+  <img src="./assets/readme/section-start.svg" width="100%" alt="02 First use — Quick start">
+</p>
 
 ### 1. Start the server
 
@@ -142,7 +161,7 @@ curl http://127.0.0.1:8787/v1/health
 # {"ok":true}
 ```
 
-Default token: `dev-token` · header: `X-InkQueue-Token`.
+Default lab token: `dev-token` · header: `X-InkQueue-Token`.
 
 ### 2. Talk through the Agent CLI (preferred)
 
@@ -162,7 +181,7 @@ node agent/inkq.js triage --apply --today-cap 5  # apply
 - Layers: [`AGENTS.md`](AGENTS.md) · [`docs/architecture.md`](docs/architecture.md)
 - API: [`docs/api.md`](docs/api.md)
 
-Optional MCP shell (`mcp-inkqueue`) wraps the same client — useful only when the host only speaks MCP.
+Optional MCP shell (`mcp-inkqueue`) wraps the same client — only when the host speaks MCP exclusively.
 
 ### 3. Build & install the APK
 
@@ -172,7 +191,7 @@ cd android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-APK path: `android/app/build/outputs/apk/debug/app-debug.apk` (~96 KB).
+APK: `android/app/build/outputs/apk/debug/app-debug.apk` (~96 KB). Desktop label: **任务**.
 
 ### 4. Configure the Kindle
 
@@ -184,7 +203,7 @@ Open **设置** (footer, or long-press title):
 | Token | `dev-token` |
 | 设备 ID | `kindle-pw3` |
 
-Kindle and PC must share the same LAN. Android 4.4 has **no `adb reverse`** — real Wi‑Fi only. Optional: Settings → **探测同步地址** (UDP discovery on `48787`).
+Kindle and PC must share the same LAN. Android 4.4 has **no `adb reverse`** — real Wi‑Fi only. Optional: Settings → **探测同步地址** (UDP discovery on port `48787`).
 
 Windows firewall (elevated once):
 
@@ -241,9 +260,9 @@ curl -s -H "X-InkQueue-Token: dev-token" http://127.0.0.1:8787/v1/tasks/snapshot
 ## Tests (verified this tree)
 
 ```bash
-npm test                 # agent triage + server API
-cd server && npm test    # 32/32
-node --test agent/test/*.test.js   # 16/16
+npm test                               # agent triage + server API
+cd server && npm test                  # 32/32
+node --test agent/test/*.test.js       # 16/16
 cd android && ./gradlew testDebugUnitTest
 ```
 
@@ -265,7 +284,7 @@ InkQueue/
   android/                  # minSdk 19 native Java client
   server/                   # Node reference API + tests
   docs/                     # product-spec · api · architecture · screenshots
-  assets/readme/            # hero / architecture / B1 proof SVGs
+  assets/readme/            # hero / architecture / section / B1 SVGs
   scripts/server-ctl.js
 ```
 
