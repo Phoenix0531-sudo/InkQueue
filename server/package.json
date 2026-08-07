@@ -10,8 +10,7 @@
     "test": "node --test test/*.test.js",
     "ctl": "node ../scripts/server-ctl.js",
     "seed": "node ../scripts/seed-sample-tasks.js",
-    "inkq": "node ../agent/inkq.js",
-    "inkq-smoke": "node ../agent/test-inkq-smoke.js"
+    "inkq": "node ../agent/inkq.js"
   },
   "engines": {
     "node": ">=18"

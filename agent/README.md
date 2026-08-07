@@ -36,7 +36,6 @@ InkQueue/
 | `lib/client.js` | 共享 HTTP + 配置解析（CLI / 可选 MCP 共用，禁止第二套协议） |
 | `interface.md` | **何时必须写成任务** 的硬契约 |
 | `config.example.json` | 配置样例 → 可复制为 `config.json` 或 `~/.inkqueue/config.json` |
-| `test-inkq-smoke.js` | 活 server 冒烟 |
 | `adapters/` | **可选、默认不用**。skill 抄写参考 + 可选 `mcp-inkqueue` 薄外壳 |
 
 ## 快速用
@@ -63,4 +62,4 @@ stdout = JSON；stderr = 短提示。
 2. **不读会话**；只提供出口与规则  
 3. **先 context 再 add**，保护墨水屏队列长度  
 4. **只走 server 已有 API**，不另起协议  
-5. 旧 `docs/agent-prompt.md` 废弃；HTTP 细节仍见 `docs/api.md`
+5. 旧 `docs/archive/agent-prompt.md` 废弃；HTTP 细节仍见 `docs/api.md`

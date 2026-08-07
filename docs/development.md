@@ -100,6 +100,8 @@ SQLiteOpenHelper 需要 Android runtime。无真机或模拟器时不运行 inst
 
 - Android `versionName` 以 `android/app/build.gradle` 为准；debug APK 约 **55 KB** 量级（无 AndroidX）。
 - 根目录 `npm test`：agent 单测（19）+ server API 单测（31）。
+- Android JVM：`cd android && ./gradlew testDebugUnitTest`（29 测试，DateUtils / SectionedTaskList / SyncResult / JsonUtils / PendingOperation）。
+- server 模块化于 `server/src/lib/`：`time.js` / `store.js` / `task.js` / `operations.js` / `agent.js` / `http.js` / `usage-routes.js`（cliproxy 仅在此处 require，可由 `INKQUEUE_DISABLE_USAGE=1` 关闭）。
 - Server 硬化：`INKQUEUE_TOKEN_PREV`、store `.bak` 轮转/损坏自愈、operations 死信裁剪、**启动时主动 prune**（`start()` 读取 store 后立即 `pruneOperations` 并 `writeStore`）、`ignored_details`、events `device_id` 过滤。
 - Agent CLI：`inkq complete` / `postpone` / `morning` / `events --device`（operations 协议，与设备同路径）。
 - Autostart：`node scripts/server-ctl.js install` 写 wrapper；创建计划任务需**管理员**权限。

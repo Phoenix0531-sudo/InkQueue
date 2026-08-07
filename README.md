@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.4 · minSdk 19 · ~55 KB APK · 31 server tests · 19 agent tests · B1 on real PW3">
+  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.4 · minSdk 19 · ~55 KB APK · 31 server + 29 JVM + 19 agent tests · B1 on real PW3">
 </p>
 
 **Agent-synced task queue for e-ink devices.**
@@ -18,7 +18,7 @@ Agent writes the queue in conversation. Kindle only views, completes, and postpo
 | **Client** | Native Java · Canvas self-draw · minSdk 19 · zero AndroidX · ~55 KB APK |
 | **Server** | Node reference API on port `8787` · JSON file store · optional TLS |
 | **Agent path** | `node agent/inkq.js` + [`agent/interface.md`](agent/interface.md) · MCP optional |
-| **Status** | **v0.9.4** · 31 server + 19 agent tests · B1 closed-loop verified on real PW3 |
+| **Status** | **v0.9.4** · 31 server + 29 Android JVM + 19 agent tests · B1 closed-loop verified on real PW3 |
 
 Home-screen name on device: **任务**.
 
@@ -286,7 +286,7 @@ cd android && ./gradlew testDebugUnitTest
 |---|---|
 | Server API (`server/test`) | **31/31** (startup prune, TTL prune, device_id, events, webhook, conflict paths) |
 | Agent (trips + client-ops) | **19/19** (postpone targets, postOperations accepted/ignored/pruned) |
-| Android JVM unit | DateUtils / SectionedTaskList / PendingOperation / JsonUtils / SyncResult |
+| Android JVM (`gradlew testDebugUnitTest`) | **29/29** (DateUtils postpone, SectionedTaskList grouping, SyncResult, JsonUtils) |
 | Real device B1 | PW3 complete → Agent title patch → snapshot keeps `done` |
 
 ---

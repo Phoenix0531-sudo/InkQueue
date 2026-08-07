@@ -48,7 +48,7 @@ public class SectionedTaskListTest {
         List<Task> tasks = new ArrayList<Task>();
         List<SectionedTaskList.Row> rows = SectionedTaskList.group(tasks, "2026-07-06").pageRows(SectionedTaskList.PAGE_TODAY, "2026-07-06");
         assertEquals(SectionedTaskList.Row.TYPE_EMPTY, rows.get(1).type);
-        assertTrue(rows.get(1).text.contains("\u4EFB\u52A1\u4F1A\u7531 Agent"));
+        assertTrue(rows.get(1).text.contains("由 Agent"));
     }
 
     @Test public void overdueTasksGoToOverduePage() {
