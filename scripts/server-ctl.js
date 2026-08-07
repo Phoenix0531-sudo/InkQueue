@@ -27,6 +27,25 @@ function ensureDataDir() {
   fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });
 }
 
+// Truncate-on-restart: if server.log exceeds LOG_MAX_BYTES, archive to
+// LOG_FILE.1 (overwriting previous rotate) and start fresh. Prevents the
+// unbounded growth problem on long-running Windows boxes where the daemon
+// can run for days and the log only ever appended.
+const LOG_MAX_BYTES = 2 * 1024 * 1024; // 2 MB cap
+function rotateLogIfLarge() {
+  try {
+    const st = fs.statSync(LOG_FILE);
+    if (st.size >= LOG_MAX_BYTES) {
+      const archive = LOG_FILE + '.1';
+      try { fs.copyFileSync(LOG_FILE, archive); } catch {}
+      fs.truncateSync(LOG_FILE, 0);
+      console.log(`[server-ctl] log rotated (${(st.size / 1024).toFixed(0)} KB → archive ${path.basename(archive)})`);
+    }
+  } catch {
+    // log file does not exist yet — nothing to rotate
+  }
+}
+
 function readPid() {
   try {
     const raw = fs.readFileSync(PID_FILE, 'utf8').trim();
@@ -132,6 +151,7 @@ function start() {
     return;
   }
   ensureDataDir();
+  rotateLogIfLarge();
   const out = fs.openSync(LOG_FILE, 'a');
   const child = spawn(process.execPath, ['src/server.js'], {
     cwd: SERVER_DIR,

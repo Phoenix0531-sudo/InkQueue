@@ -324,7 +324,7 @@ Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_
 
 ## Known limitations
 
-- Pull-only sync (open app / tap 同步) — no push notifications
+- Sync is background-poll only (AlarmManager every 1/5/15/30 min on app launch or 「关闭」) — no FCM/Push
 - Single shared token — not multi-user auth
 - Reference store is a JSON file (swap D1/KV/DB later)
 - Agent does **not** scrape chat history; it must call `inkq` on purpose
