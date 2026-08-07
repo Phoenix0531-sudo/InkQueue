@@ -59,7 +59,9 @@ function planTriage(input) {
 
   const actions = [];
 
-  // 1) Chronic: never auto-defer. Suggest ask_user_cancel_or_split.
+  // 1) Chronic: default suggest ask_user_cancel_or_split.
+  // When suggestSplit=true, also emit a split_suggest action that carries a
+  // concrete decomposition template (subtask title prefix + defer original done).
   for (const s of chronic) {
     actions.push({
       action: 'chronic_ask_user',
@@ -71,6 +73,17 @@ function planTriage(input) {
       suggest: 'ask_user_cancel_or_split',
       deferred_due_date_if_forced: nextMon
     });
+    if (input.suggestSplit) {
+      actions.push({
+        action: 'split_suggest',
+        task_id: s.task_id,
+        title: s.title || null,
+        reason: 'chronic_postpone_split',
+        subtask_title_prefix: (s.title || s.task_id) + ' — 拆分#',
+        subtask_due_date: nextMon,
+        original_done_after_split: true
+      });
+    }
   }
 
   // 2) Overflow non-chronic today tasks -> this weekend. Keep due_time.
@@ -98,11 +111,14 @@ function planTriage(input) {
 
 /**
  * Apply filter: returns actions that --apply will actually patch.
- * chronic are excluded unless forceChronic=true.
+ * chronic_ask_user are excluded unless forceChronic=true.
+ * split_suggest are excluded unless suggestSplitApply=true (caller opted in
+ * to --suggest-split --apply).
  */
-function applyableActions(actions, forceChronic) {
+function applyableActions(actions, forceChronic, suggestSplitApply) {
   return actions.filter((a) => {
     if (a.action === 'chronic_ask_user') return !!forceChronic;
+    if (a.action === 'split_suggest') return !!suggestSplitApply;
     return true;
   });
 }

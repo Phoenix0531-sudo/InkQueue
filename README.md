@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.4 · minSdk 19 · ~55 KB APK · 31 server + 29 JVM + 19 agent tests · B1 on real PW3">
+  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.5 · minSdk 19 · ~57 KB APK · 41 server + 35 JVM + 25 agent tests · B1 on real PW3">
 </p>
 
 **Agent-synced task queue for e-ink devices.**
@@ -18,7 +18,7 @@ Agent writes the queue in conversation. Kindle only views, completes, and postpo
 | **Client** | Native Java · Canvas self-draw · minSdk 19 · zero AndroidX · ~55 KB APK |
 | **Server** | Node reference API on port `8787` · JSON file store · optional TLS |
 | **Agent path** | `node agent/inkq.js` + [`agent/interface.md`](agent/interface.md) · MCP optional |
-| **Status** | **v0.9.4** · 31 server + 29 Android JVM + 19 agent tests · B1 closed-loop verified on real PW3 |
+| **Status** | **v0.9.5** · 41 server + 35 Android JVM + 25 agent tests · B1 closed-loop verified on real PW3 |
 
 Home-screen name on device: **任务**.
 
@@ -241,9 +241,9 @@ curl -s -H "X-InkQueue-Token: dev-token" http://127.0.0.1:8787/v1/tasks/snapshot
 
 ---
 
-## Features (v0.9.4)
+## Features (v0.9.5)
 
-Installed on device as `versionName 0.9.4` / `versionCode 94` (startup prune + `dropDeadPendingOperations`).
+Installed on device as `versionName 0.9.5` / `versionCode 95` (startup prune + `dropDeadPendingOperations` + background AlarmManager sync with configurable interval).
 
 **Kindle**
 
@@ -277,16 +277,16 @@ Installed on device as `versionName 0.9.4` / `versionCode 94` (startup prune + `
 
 ```bash
 npm test                               # agent triage + server API
-cd server && npm test                  # 31/31
-node --test agent/test/*.test.js       # 19/19
+cd server && npm test                  # 41/41
+node --test agent/test/*.test.js       # 25/25
 cd android && ./gradlew testDebugUnitTest
 ```
 
 | Suite | Result |
 |---|---|
-| Server API (`server/test`) | **31/31** (startup prune, TTL prune, device_id, events, webhook, conflict paths) |
-| Agent (trips + client-ops) | **19/19** (postpone targets, postOperations accepted/ignored/pruned) |
-| Android JVM (`gradlew testDebugUnitTest`) | **29/29** (DateUtils postpone, SectionedTaskList grouping, SyncResult, JsonUtils) |
+| Server API (`server/test`) | **41/41** (startup prune, TTL prune, device_id, events, webhook, conflict paths, If-Modified-Since 304, TLS HTTPS) |
+| Agent (`triage` + `client-ops`) | **25/25** (postpone targets, postOperations accepted/ignored/pruned, suggest-split plan + apply) |
+| Android JVM (`gradlew testDebugUnitTest`) | **35/35** (DateUtils postpone, SectionedTaskList grouping, SyncResult, JsonUtils, SyncScheduler interval snap) |
 | Real device B1 | PW3 complete → Agent title patch → snapshot keeps `done` |
 
 ---
@@ -306,14 +306,16 @@ InkQueue/
 
 ---
 
-## Hardening notes (v0.9.4)
+## Hardening notes (v0.9.5)
 
 | Topic | Behavior |
 |---|---|
 | Dead pending (device) | Drop ops with empty type/task_id or `retry_count` ≥ max |
 | Dead ops (server) | Drop typeless legacy rows; TTL default 30d; max retain 500; **startup prune** cleans before serving |
 | Multi-device | Same token; each applied op stores `device_id` for audit |
-| TLS | Set both `INKQUEUE_TLS_KEY` and `INKQUEUE_TLS_CERT` to serve HTTPS; reverse proxy still preferred in production |
+| Background sync (device) | AlarmManager `ELAPSED_REALTIME_WAKEUP` + inexact repeating; interval selectable in Settings (1/5/15/30 min or 关闭); `SyncTickReceiver` holds a partial wake-lock ≤20s per tick to keep sync alive on e-ink suspend; rescheduled on app launch |
+| Server power-save | `GET /v1/tasks/snapshot` honors `If-Modified-Since` → **304** with empty body when store unchanged; client polls cheaply every few minutes without downloading JSON |
+| TLS | Set both `INKQUEUE_TLS_KEY` and `INKQUEUE_TLS_CERT` to serve HTTPS directly; reverse proxy (Caddy / nginx) still preferred in production; Kindle 4.4 self-signed CA import steps in [`docs/api.md`](docs/api.md) |
 | HTTP cleartext | Allowed for LAN lab only |
 
 Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_TOKEN`, `INKQUEUE_TOKEN_PREV`, `INKQUEUE_PORT`.
@@ -342,6 +344,7 @@ Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_
 - v0.9.2: dead-op prune both sides, `device_id` audit, optional TLS, B1 closed-loop docs, README redesign, device reinstall verified (`versionCode 92`)
 - **v0.9.3**: token rotate (`TOKEN_PREV`), store `.bak` rotate/heal, `events --device`, `ignored_details`, CLI complete/postpone/morning, e-ink UX harden (long-press cancel, empty-state copy), (`versionCode 93`)
 - **v0.9.4**: startup auto-prune (server cleans before serving), Android parses `pruned` + masthead 「服务端清理 N 条」, TTL/startup prune tests, postOperations end-to-end test, (`versionCode 94`)
+- **v0.9.5**: triage `--suggest-split` (chronic 首选拆分执行而非整块推迟) + `--split-parts N` + 6 plan/apply 单测, Kindle 后台同步 (AlarmManager ELAPSED_REALTIME_WAKEUP + inexact repeating + SyncTickReceiver partial wake-lock ≤20s, Settings 后台同步 interval 1/5/15/30 min / 关闭), server `If-Modified-Since` 304 省电 + Last-Modified 头 + writeStore mtime bump to next whole second, TLS HTTPS 端到端真跑验通 (自签证书 + `INKQUEUE_TLS_KEY/CERT` 直接 HTTPS + Caddy 反代 + Kindle 4.4 自签 CA 导入文档), (`versionCode 95`)
 
 **Not in scope (separate products)**
 
@@ -351,8 +354,8 @@ Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_
 
 - Vendor e-ink partial API if KOSP exposes one
 - Stronger production store (SQLite/D1) behind the same HTTP contract
-- `inkq triage` auto-patch chronic (controlled by `--force-chronic`)
-- Agent-facing webhook reverse-notify (server → Agent on device events)
+- `inkq triage` `--force-chronic` for explicit "整块推迟" keep-as-one deferral
+- Agent-facing webhook reverse-notify (server → Agent on device events) via background sync ticks rather than FCM/Push
 - TLS reverse-proxy production hardening proven run
 
 ---

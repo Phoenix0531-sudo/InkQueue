@@ -5,13 +5,21 @@
 
 const { HttpError } = require('./task');
 
-function sendJson(res, status, body) {
+function sendJson(res, status, body, extraHeaders) {
   const encoded = Buffer.from(JSON.stringify(body, null, 2));
-  res.writeHead(status, {
+  const headers = {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': encoded.length,
     'Cache-Control': 'no-store'
-  });
+  };
+  if (extraHeaders) {
+    for (const k of Object.keys(extraHeaders)) {
+      if (extraHeaders[k] !== undefined && extraHeaders[k] !== null) {
+        headers[k] = extraHeaders[k];
+      }
+    }
+  }
+  res.writeHead(status, headers);
   res.end(encoded);
 }
 

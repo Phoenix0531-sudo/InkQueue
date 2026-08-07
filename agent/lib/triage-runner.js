@@ -18,7 +18,7 @@
 const path = require('path');
 const triageMod = require(path.join(__dirname, 'triage.js'));
 const client = require(path.join(__dirname, 'client.js'));
-const { context: apiContext, events: apiEvents, snapshot: apiSnapshot, patchTask: apiPatchTask } = client;
+const { context: apiContext, events: apiEvents, snapshot: apiSnapshot, patchTask: apiPatchTask, createTask: apiCreateTask } = client;
 
 function flagBool(v) {
   return v === 'true' || v === true;
@@ -28,6 +28,8 @@ async function runTriage(cfg, flags) {
   const CAP = Number(flags.cap) || 5;
   const apply = flagBool(flags.apply);
   const forceChronic = flagBool(flags.forceChronic) || flagBool(flags['force-chronic']);
+  const suggestSplit = flagBool(flags.suggestSplit) || flagBool(flags['suggest-split']);
+  const suggestSplitN = Number(flags.splitParts || flags['split-parts']) || 2;
 
   // 1) Load context (today's open count) + chronic signals from events.
   const [ctxRes, evRes] = await Promise.all([
@@ -63,7 +65,8 @@ async function runTriage(cfg, flags) {
     cap: CAP,
     chronic: chronic,
     today_tasks: todayTasks,
-    now: new Date()
+    now: new Date(),
+    suggestSplit
   });
   if (snapRes.status !== 200) {
     plan.snapshot_unavailable = snapRes.err ? snapRes.err.message : `status=${snapRes.status}`;
@@ -79,8 +82,11 @@ async function runTriage(cfg, flags) {
     };
   }
 
-  // 5) Apply: patch each actionable task (chronic skipped unless --force-chronic).
-  const applyList = triageMod.applyableActions(plan.actions, forceChronic);
+  // 5) Apply: patch each actionable task (chronic skipped unless --force-chronic;
+  // split_suggest ADDS subtasks + patches original done, only when both
+  // --apply and --suggest-split are set).
+  const suggestSplitApply = apply && suggestSplit;
+  const applyList = triageMod.applyableActions(plan.actions, forceChronic, suggestSplitApply);
   const skippedChronic =
     plan.actions.filter((a) => a.action === 'chronic_ask_user').length -
     applyList.filter((a) => a.action === 'chronic_ask_user').length;
@@ -93,10 +99,81 @@ async function runTriage(cfg, flags) {
         ok: false,
         skipped: true,
         reason: 'chronic_needs_user_decision',
-        hint: '问用户是否取消/拆分；或加 --force-chronic 强制推迟到 ' + a.deferred_due_date_if_forced
+        hint: '问用户是否取消/拆分；或加 --force-chronic 强制推迟到 ' + a.deferred_due_date_if_forced + '；或加 --suggest-split 拆分'
       });
       continue;
     }
+    if (a.action === 'split_suggest' && !suggestSplitApply) {
+      // dry-run includes split_suggest only when --suggest-split; the
+      // plan-level action is informational. Already emitted by plan.
+      continue;
+    }
+    if (a.action === 'split_suggest' && suggestSplitApply) {
+      // (1) Add N subtasks (configured by --split-parts, default 2).
+      const parts = Math.max(1, Math.min(5, suggestSplitN));
+      const subIds = [];
+      let subAddOk = true;
+      for (let i = 1; i <= parts; i++) {
+        const subBody = {
+          title: `${a.subtask_title_prefix}${i}`,
+          due_date: a.subtask_due_date,
+          source: 'agent',
+          note: `拆分自 ${a.title || a.task_id}`
+        };
+        if (flags.why !== undefined) subBody.why = flags.why;
+        if (flags.source_session !== undefined) subBody.source_session = flags.source_session;
+        try {
+          const r = await apiCreateTask(cfg, subBody);
+          if (r.status === 201 || r.status === 200) {
+            subIds.push(((r.json || {}).task || {}).id || null);
+          } else {
+            subAddOk = false;
+            results.push({
+              task_id: a.task_id,
+              ok: false,
+              split_index: i,
+              status: r.status,
+              error: r.json
+            });
+            break;
+          }
+        } catch (e) {
+          subAddOk = false;
+          results.push({ task_id: a.task_id, ok: false, split_index: i, error: String(e.message) });
+          break;
+        }
+      }
+      if (!subAddOk) continue;
+      // (2) Patch original task done.
+      let doneOk = false;
+      try {
+        const res = await apiPatchTask(cfg, a.task_id, { status: 'done' });
+        if (res.status === 200) {
+          doneOk = true;
+        } else {
+          results.push({
+            task_id: a.task_id,
+            ok: false,
+            original_patch: true,
+            status: res.status,
+            error: res.json
+          });
+        }
+      } catch (e) {
+        results.push({ task_id: a.task_id, ok: false, original_patch: true, error: String(e.message) });
+      }
+      if (doneOk) {
+        results.push({
+          task_id: a.task_id,
+          ok: true,
+          split: true,
+          subtask_ids: subIds,
+          parts
+        });
+      }
+      continue;
+    }
+    // Existing: defer_overflow_weekend or force-chronic defer.
     const due = a.action === 'chronic_ask_user' ? a.deferred_due_date_if_forced : a.new_due_date;
     const body = { due_date: due };
     if (a.action === 'chronic_ask_user') body.force = true;

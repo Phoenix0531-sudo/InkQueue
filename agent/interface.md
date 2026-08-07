@@ -90,12 +90,20 @@ node agent/inkq.js context   # 附带 chronic_postpone[] + rules
 node agent/inkq.js patch triage            # dry-run: 看建议
 node agent/inkq.js patch triage --apply    # 真改
 node agent/inkq.js patch triage --cap 4    # 自定义今日上限（默认 5）
+node agent/inkq.js patch triage --suggest-split
+node agent/inkq.js patch triage --apply --suggest-split --split-parts 3
 ```
 
 - 读 `context` + `chronic_postpone` 信号。
 - 今日 open 超过 cap（默认 5）：溢出部分推迟到本周六（保留 due_time）。
 - **chronic_postpone 任务：dry-run 和 `--apply` 都只建议「问用户是否取消/拆分」**，**不自动推迟**（硬规则：禁止只改 due 糊弄 chronic）。要强制推迟到下周一需显式 `--apply --force-chronic`。
 - dry-run 只输出 plan，不真改；`--apply` 才 patch。
+- **`--suggest-split`**：为每个 chronic 任务在 plan 里追加一条 `split_suggest` 行动，含**拆分模板**——
+  `subtask_title_prefix = "<原标题> — 拆分#"`，`subtask_due_date = 下周一`。
+  - dry-run 时仅展示模板，不动数据。
+  - `--apply --suggest-split` 真改：**(1)** 按 `--split-parts`（默认 2，clamp 1-5）创建 N 个子任务（标题 ` prefix + i`，继承 due_date=下周，note 标注原任务），**(2)** patch 原 chronic 任务 `status=done`。
+  - split 是 chronic 的**首选处理路径**，`--force-chronic` 仅当用户明确说「整块推迟到下周」时用。
+  - split 子任务以 source=agent 写入；下次 Kindle sync 即可见。
 
 ## 对用户怎么说话
 

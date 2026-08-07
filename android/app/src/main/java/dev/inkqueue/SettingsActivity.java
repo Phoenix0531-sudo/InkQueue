@@ -15,12 +15,15 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import dev.inkqueue.sync.ServerDiscovery;
+import dev.inkqueue.sync.SyncScheduler;
 import dev.inkqueue.sync.SyncService;
 
 /**
@@ -40,6 +43,7 @@ public class SettingsActivity extends Activity {
     private EditText baseUrl;
     private EditText tkn;
     private EditText deviceId;
+    private TextView intervalLabel;
 
     // v0.7 design system constants — mirrored from InkMainView / InkDetailView
     private static final int PAD              = 40;
@@ -117,6 +121,18 @@ public class SettingsActivity extends Activity {
         addField(root, "Token", tkn);
         addSpace(root, FIELD_GAP);
         addField(root, "设备 ID", deviceId);
+        addSpace(root, FIELD_GAP);
+
+        // Background sync interval — tablet-tap-friendly choose-row.
+        // Tap opens a small choices dialog (Spinner is awkward on e-ink touch).
+        intervalLabel = actionRow(
+            SyncScheduler.INTERVAL_LABELS[SyncScheduler.labelIndex(
+                SyncScheduler.readIntervalSeconds(prefs))],
+            VALUE_SP, false, FIELD_ROW_H,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { showIntervalDialog(); }
+            });
+        addIntervalField(root, "后台同步", intervalLabel);
         addSpace(root, SECTION_GAP);
 
         // Action set — same as detail page: 2px rule + 84px row + bold label
@@ -148,6 +164,46 @@ public class SettingsActivity extends Activity {
         root.addView(label);
         root.addView(field, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(FIELD_ROW_H)));
+    }
+
+    /** Same as addField but for a tap-to-pick TextView value row (no EditText). */
+    private void addIntervalField(LinearLayout root, String name, TextView value) {
+        TextView label = new TextView(this);
+        label.setText(name);
+        label.setTextColor(PURE_BLACK);
+        label.setTextSize(LABEL_SP);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setPadding(0, 0, 0, dp(LABEL_PAD_BOTTOM));
+        root.addView(label);
+        root.addView(value, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(FIELD_ROW_H)));
+    }
+
+    private void showIntervalDialog() {
+        final SharedPreferences localPrefs = PreferenceManager.getDefaultSharedPreferences(this);
+        final String[] items = SyncScheduler.INTERVAL_LABELS;
+        int currentIdx = SyncScheduler.labelIndex(
+            SyncScheduler.readIntervalSeconds(localPrefs));
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("后台同步间隔");
+        b.setSingleChoiceItems(items, currentIdx, new DialogInterface.OnClickListener() {
+            @Override public void onClick(DialogInterface dialog, int which) {
+                int seconds = SyncScheduler.ALLOWED_INTERVALS[which];
+                SharedPreferences.Editor e = localPrefs.edit();
+                e.putInt(SyncScheduler.KEY_SYNC_INTERVAL_SECONDS, seconds);
+                e.apply();
+                if (intervalLabel != null) {
+                    intervalLabel.setText(SyncScheduler.INTERVAL_LABELS[which]);
+                }
+                dialog.dismiss();
+            }
+        });
+        b.setNegativeButton("返回", new DialogInterface.OnClickListener() {
+            @Override public void onClick(DialogInterface dialog, int which) {
+                dialog.dismiss();
+            }
+        });
+        b.show();
     }
 
     /** EditText on a paper-form baseline — no box outline. */
@@ -204,6 +260,8 @@ public class SettingsActivity extends Activity {
                 .putString(SyncService.KEY_AUTH, tkn.getText().toString().trim())
                 .putString(SyncService.KEY_DEVICE_ID, deviceId.getText().toString().trim())
                 .apply();
+        // (Re)arm background sync alarm with the latest interval setting.
+        SyncScheduler.reschedule(this);
         Intent d = new Intent();
         d.putExtra("message", "设置已保存");
         setResult(RESULT_OK, d);

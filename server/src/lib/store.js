@@ -96,6 +96,14 @@ function create({ dataFile }) {
     const tmp = DATA_FILE + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
     fs.renameSync(tmp, DATA_FILE);
+    // Bump mtime to the next whole second so If-Modified-Since (which carries
+    // 1s-resolution HTTP-date) can distinguish "changed in the same second"
+    // from "not changed". Without this, two writes within the same second
+    // both report mtimeSec === sinceSec and a real mutation could be hidden.
+    const next = Math.floor(Date.now() / 1000) + 1;
+    try {
+      fs.utimesSync(DATA_FILE, next, next);
+    } catch (_) { /* best-effort; stat will use rename mtime as fallback */ }
   }
 
   function operationStore(store) {

@@ -37,3 +37,6 @@ __pycache__/
 docs/screenshots/v7-probe-*.png
 docs/screenshots/audit/
 .probe_tmp/
+
+# TLS dev certs (do not commit; only for local HTTPS testing)
+server/data/tls/*.pem

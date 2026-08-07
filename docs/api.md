@@ -336,12 +336,23 @@ InkQueue 还提供 CPA-only 的 `/v1/usage`、`/v1/cliproxy/health`、`/v1/clipr
 
 ## HTTPS 反代配方（局域网 / 生产）
 
-参考 server 本身可用 `INKQUEUE_TLS_KEY` + `INKQUEUE_TLS_CERT` 直接 HTTPS。更常见是前面挂反代：
+参考 server 本身可用 `INKQUEUE_TLS_KEY` + `INKQUEUE_TLS_CERT` 直接 HTTPS（适合本地端到端验证，见 `server/data/tls/README.md`）。更常见是前面挂反代：
 
-### Caddy
+### Caddy（自动 HTTPS，公网域名）
 
 ```caddyfile
 inkqueue.example.com {
+  reverse_proxy 127.0.0.1:8787
+}
+```
+
+公网域名场景下 Caddy 自动申请 Let's Encrypt 证书，Kindle 端无需任何额外信任操作（系统 CA 已含 Let's Encrypt）。
+
+### Caddy（局域网自签）
+
+```caddyfile
+https://inkqueue.local:8443 {
+  tls ./server/data/tls/cert.pem ./server/data/tls/key.pem
   reverse_proxy 127.0.0.1:8787
 }
 ```
@@ -362,4 +373,25 @@ server {
 }
 ```
 
-Kindle 端 Settings 填 `https://inkqueue.example.com`（需设备信任证书；局域网自签证书在 Android 4.4 上较麻烦，开发期可继续 HTTP）。
+Kindle 端 Settings 填 `https://inkqueue.example.com`（需设备信任证书；公网 Let's Encrypt 自动信任；局域网自签证书在 Android 4.4 上需手动导入 CA）。
+
+## Kindle Paperwhite 3 (Android 4.4.2) 信任自签 CA
+
+Android 4.4 不在 Settings → Security →「Install from storage」直接接受用户 CA 的所有格式。root 设备（KOSP / CracKDroid 环境可 root）走系统 CA store 最稳：
+
+```bash
+# 1. 把 cert.pem 转成 Android 期望的格式（hash 命名）
+CERT=server/data/tls/cert.pem
+HASH=$(openssl x509 -inform PEM -subject_hash_old -in "$CERT" | head -1)
+cp "$CERT" "${HASH}.0"
+# 2. 推到设备 system CA store（root + remount /system 可写）
+adb root
+adb remount                       # 若失败：adb shell mount -o remount,rw /system
+adb push "${HASH}.0" /system/etc/security/cacerts/${HASH}.0
+adb shell chmod 644 /system/etc/security/cacerts/${HASH}.0
+adb reboot
+```
+
+非 root 设备可用「Install from storage」从 Settings → Security 安装 `cert.pem`（部分 4.4 build 仅 PKCS#12 .p12 接受，需要 `openssl pkcs12 -export -in cert.pem -inkey key.pem -out inkqueue.p12` 再装）。
+
+最省心的局域网开发路径：保持 HTTP，仅在 README 提示生产换公网域名 + Let's Encrypt Caddy 反代即可，**v0.1 不要求墨水屏设备强制 TLS**。

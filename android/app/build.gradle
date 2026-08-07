@@ -10,8 +10,8 @@ android {
         applicationId 'dev.inkqueue'
         minSdk 19
         targetSdk 35
-        versionCode 94
-        versionName '0.9.4'
+        versionCode 95
+        versionName '0.9.5'
         testInstrumentationRunner 'android.test.InstrumentationTestRunner'
     }
 

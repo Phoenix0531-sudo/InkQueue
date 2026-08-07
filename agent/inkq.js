@@ -71,6 +71,9 @@ Triage:
   inkq patch triage             dry-run: show plan (chronic + today overflow)
   inkq patch triage --apply     apply patches (overflow today to this weekend)
   inkq patch triage --apply --force-chronic  ALSO defer chronic to next Mon
+  inkq patch triage --suggest-split        dry-run: show split templates for chronic
+  inkq patch triage --apply --suggest-split  split chronic: add N subtasks + mark original done
+  inkq patch triage --suggest-split --split-parts 3   custom split count (default 2, max 5)
   inkq patch triage --cap <N>   override today cap (default 5)
 
   chronic tasks are NEVER auto-deferred by default (hard rule: ask user

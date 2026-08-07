@@ -194,3 +194,83 @@ test('planTriage: defaults sensible when fields missing', () => {
   assert.equal(plan.today_open, 0);
   assert.equal(plan.actions.length, 0);
 });
+
+// ---- planTriage: suggest-split (chronic decomposition template) ----
+
+test('planTriage: suggestSplit emits split_suggest alongside ask_user', () => {
+  const plan = planTriage({
+    today_open: 0, cap: 5,
+    chronic: [{ task_id: 'c1', title: '大宛齐', postpone_count_window: 3, last_at: '2026-08-01T00:00:00+08:00' }],
+    today_tasks: [],
+    now: new Date(2026, 7, 5),
+    suggestSplit: true
+  });
+  assert.equal(plan.actions.length, 2);
+  assert.equal(plan.actions[0].action, 'chronic_ask_user');
+  assert.equal(plan.actions[1].action, 'split_suggest');
+  const s = plan.actions[1];
+  assert.equal(s.task_id, 'c1');
+  assert.ok(s.subtask_title_prefix.startsWith('大宛齐'), 'prefix derived from title');
+  assert.equal(s.subtask_due_date, '2026-08-10', 'Wed 08-05 -> next Mon 08-10');
+  assert.equal(s.original_done_after_split, true);
+  assert.equal(s.reason, 'chronic_postpone_split');
+});
+
+test('planTriage: suggestSplit with missing title uses task_id in prefix', () => {
+  const plan = planTriage({
+    today_open: 0, cap: 5,
+    chronic: [{ task_id: 'c_no_title', postpone_count_window: 3 }],
+    today_tasks: [],
+    now: new Date(2026, 7, 5),
+    suggestSplit: true
+  });
+  // With title missing, only chronic signal is emitted and split uses task_id.
+  assert.equal(plan.actions.length, 2);
+  assert.equal(plan.actions[1].subtask_title_prefix, 'c_no_title — 拆分#');
+});
+
+test('planTriage: suggestSplit=false (default) does NOT emit split_suggest', () => {
+  const plan = planTriage({
+    today_open: 0, cap: 5,
+    chronic: [{ task_id: 'c1', title: 'X' }],
+    today_tasks: [],
+    now: new Date(2026, 7, 5)
+  });
+  assert.ok(plan.actions.every(a => a.action !== 'split_suggest'),
+    'no split_suggest without suggestSplit=true');
+  assert.equal(plan.actions.length, 1);
+  assert.equal(plan.actions[0].action, 'chronic_ask_user');
+});
+
+// ---- applyableActions: suggest-split apply gating ----
+
+test('applyableActions: split_suggest excluded by default', () => {
+  // plan has split_suggest action but caller doesn't opt in:
+  const acts = [
+    { action: 'split_suggest', task_id: 'c1' },
+    { action: 'defer_overflow_weekend', task_id: 't1' }
+  ];
+  const result = applyableActions(acts, false, false);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].action, 'defer_overflow_weekend');
+});
+
+test('applyableActions: split_suggest included only when suggestSplitApply=true', () => {
+  const acts = [{ action: 'split_suggest', task_id: 'c1' }];
+  const result = applyableActions(acts, false, true);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].action, 'split_suggest');
+  assert.equal(result[0].task_id, 'c1');
+});
+
+test('applyableActions: forceChronic still excludes split_suggest while suggestSplitApply=false', () => {
+  // forceChronic applies only to chronic_ask_user; split_suggest is gated independently.
+  const acts = [
+    { action: 'chronic_ask_user', task_id: 'c1' },
+    { action: 'split_suggest', task_id: 'c1' }
+  ];
+  const result = applyableActions(acts, true, false);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].action, 'chronic_ask_user');
+  assert.ok(!result.some(a => a.action === 'split_suggest'));
+});

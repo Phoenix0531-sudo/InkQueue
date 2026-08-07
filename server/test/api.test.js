@@ -888,3 +888,113 @@ test('start() prunes expired operations on startup', async () => {
     require('../src/server');
   }
 });
+
+test('snapshot returns 304 when If-Modified-Since >= store mtime', async () => {
+  fs.writeFileSync(process.env.INKQUEUE_DATA_FILE, JSON.stringify({ tasks: [], operations: [] }, null, 2));
+  const server = start(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://localhost:${server.address().port}`;
+  try {
+    // First call to get Last-Modified
+    const r1 = await request(baseUrl, '/v1/tasks/snapshot', { headers: { 'X-InkQueue-Token': 'dev-token' } });
+    assert.equal(r1.status, 200);
+    const lastModified = r1.headers.get('last-modified');
+    assert.ok(lastModified, 'snapshot must return Last-Modified');
+
+    // Second call with If-Modified-Since = Last-Modified -> 304
+    const r2 = await request(baseUrl, '/v1/tasks/snapshot', {
+      headers: { 'X-InkQueue-Token': 'dev-token', 'If-Modified-Since': lastModified }
+    });
+    assert.equal(r2.status, 304, 'should be 304 when IMS >= mtime');
+    assert.ok(r2.headers.get('last-modified'), '304 should still echo Last-Modified');
+
+    // Mutating via a task create bumps mtime -> next snapshot is 200
+    const addRes = await request(baseUrl, '/v1/tasks', {
+      method: 'POST',
+      headers: { 'X-InkQueue-Token': 'dev-token' },
+      json: { title: 'push test', due_date: '2026-08-12' }
+    });
+    assert.equal(addRes.status, 201);
+    // Add a tiny wait to ensure mtime advances past the (1s) IMS resolution.
+    await new Promise((r) => setTimeout(r, 1100));
+    // Same IMS header now too old -> 200 again
+    const r3 = await request(baseUrl, '/v1/tasks/snapshot', {
+      headers: { 'X-InkQueue-Token': 'dev-token', 'If-Modified-Since': lastModified }
+    });
+    assert.equal(r3.status, 200, 'should be 200 after mutation');
+    const j = await r3.json();
+    assert.equal(j.tasks.length, 1);
+    assert.equal(j.tasks[0].title, 'push test');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('snapshot ignores garbage If-Modified-Since and returns 200', async () => {
+  fs.writeFileSync(process.env.INKQUEUE_DATA_FILE, JSON.stringify({ tasks: [], operations: [] }, null, 2));
+  const server = start(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://localhost:${server.address().port}`;
+  try {
+    const r = await request(baseUrl, '/v1/tasks/snapshot', {
+      headers: { 'X-InkQueue-Token': 'dev-token', 'If-Modified-Since': 'not-a-date' }
+    });
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.ok(Array.isArray(j.tasks));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('TLS env: server starts HTTPS when INKQUEUE_TLS_KEY/CERT set', async () => {
+  const certDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inkqueue-tls-'));
+  // Generate self-signed cert via openssl (CI may lack openssl, skip if so).
+  let certOk = false;
+  try {
+    const keyPath = path.join(certDir, 'key.pem');
+    const certPath = path.join(certDir, 'cert.pem');
+    require('child_process').execSync(
+      'openssl req -x509 -newkey rsa:2048 -nodes -keyout ' + keyPath +
+      ' -out ' + certPath + ' -days 1 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"',
+      { stdio: 'pipe' }
+    );
+    certOk = fs.existsSync(keyPath) && fs.existsSync(certPath);
+    process.env.INKQUEUE_TLS_KEY = keyPath;
+    process.env.INKQUEUE_TLS_CERT = certPath;
+  } catch (_) {
+    certOk = false;
+  }
+  if (!certOk) {
+    process.env.NODE_SKIP_INKQUEUE_TLS_TEST = '1';
+  }
+  try {
+    if (!certOk) { return; } // openssl unavailable in test env: skip
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    delete require.cache[require.resolve('../src/server')];
+    const { start } = require('../src/server');
+    const server = start(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const baseUrl = `https://localhost:${server.address().port}`;
+    try {
+      const res = await fetch(baseUrl + '/v1/health');
+      assert.equal(res.status, 200);
+      const j = await res.json();
+      assert.deepEqual(j, { ok: true });
+      // snapshot too
+      const sres = await fetch(baseUrl + '/v1/tasks/snapshot', { headers: { 'X-InkQueue-Token': 'dev-token' } });
+      assert.equal(sres.status, 200);
+      const sj = await sres.json();
+      assert.ok(Array.isArray(sj.tasks));
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      delete process.env.INKQUEUE_TLS_KEY;
+      delete process.env.INKQUEUE_TLS_CERT;
+      delete require.cache[require.resolve('../src/server')];
+      require('../src/server');
+    }
+  } finally {
+    try { fs.rmSync(certDir, { recursive: true, force: true }); } catch (_) {}
+  }
+});

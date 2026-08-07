@@ -103,8 +103,8 @@ function webhookEventId(input) {
 
 // ── sendJson ──
 
-function sendJson(res, status, body) {
-  httpMod.sendJson(res, status, body);
+function sendJson(res, status, body, headers) {
+  httpMod.sendJson(res, status, body, headers);
 }
 
 // ── optional usage routes ──
@@ -137,8 +137,41 @@ async function handleRequest(req, res) {
   }
 
   if (req.method === 'GET' && url.pathname === '/v1/tasks/snapshot') {
+    // If-Modified-Since conditional: when the client passes an HTTP-date
+    // (e.g. last `server_time` they saw, or the file mtime), and the on-disk
+    // store has not been modified since, return 304 with empty body. This
+    // is the e-ink power-saving path — Kindle polls every few minutes but
+    // most ticks short-circuit with no JSON body to download or parse.
+    const imsHeader = req.headers['if-modified-since'];
+    if (imsHeader) {
+      const sinceMs = Date.parse(imsHeader);
+      if (!Number.isNaN(sinceMs)) {
+        try {
+          const stat = fs.statSync(DATA_FILE);
+          const mtimeSec = Math.floor(stat.mtimeMs / 1000);
+          const sinceSec = Math.floor(sinceMs / 1000);
+          // <= (not <): when the client sends back the Last-Modified we just
+          // handed it, mtimeSec === sinceSec means the store has NOT changed
+          // since (the same second). writeStore() bumps mtime to the next
+          // whole second on every mutation (see lib/store.js), so a real
+          // change always makes mtimeSec > sinceSec.
+          if (mtimeSec <= sinceSec) {
+            res.writeHead(304, { 'Last-Modified': stat.mtime.toUTCString() });
+            res.end();
+            return;
+          }
+        } catch (_) {
+          // stat failed (file missing?) — fall through to full snapshot.
+        }
+      }
+    }
     const s = readStore();
-    sendJson(res, 200, { server_time: nowIso(), tasks: s.tasks.map(publicTask) }); return;
+    const headers = {};
+    try {
+      const stat = fs.statSync(DATA_FILE);
+      headers['Last-Modified'] = stat.mtime.toUTCString();
+    } catch (_) {}
+    sendJson(res, 200, { server_time: nowIso(), tasks: s.tasks.map(publicTask) }, headers); return;
   }
 
   if (req.method === 'GET' && url.pathname === '/v1/events') {

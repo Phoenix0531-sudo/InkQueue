@@ -16,6 +16,7 @@ import dev.inkqueue.data.Task;
 import dev.inkqueue.data.TaskRepository;
 import dev.inkqueue.data.OperationQueue;
 import dev.inkqueue.sync.SyncResult;
+import dev.inkqueue.sync.SyncScheduler;
 import dev.inkqueue.sync.SyncService;
 import dev.inkqueue.ui.InkMainView;
 import dev.inkqueue.ui.SectionedTaskList;
@@ -61,6 +62,11 @@ public class MainActivity extends Activity implements InkMainView.Listener {
 
         applyAlwaysOnMode();
         renderLocal();
+        // (Re)arm the periodic background sync alarm from current prefs.
+        // On Android 4.4 the alarm survives boot only if a BroadcastReceiver
+        // catches BOOT_COMPLETED; we don't ship that yet — MainActivity launch
+        // is the practical "the device woke up" hook, so re-arm here.
+        SyncScheduler.reschedule(this);
         syncInBackground(false);
     }
 

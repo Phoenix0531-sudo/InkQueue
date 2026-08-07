@@ -191,6 +191,14 @@ const TOOLS = [
           type: 'boolean',
           description: 'defer chronic_late to next Monday even though human should decide (defaults false; chronic stays ask_user)'
         },
+        suggest_split: {
+          type: 'boolean',
+          description: 'emit split_suggest actions for chronic tasks: a decomposition template (subtask_title_prefix + subtask_due_date) is added to the plan. With apply=true, splits the chronic task: adds N subtasks and marks the original done.'
+        },
+        split_parts: {
+          type: 'number',
+          description: 'when suggest_split=true, how many subtasks to create per chronic task (default 2, clamped 1-5)'
+        },
         why: { type: 'string', description: 'audit note when applying patches' },
         source_session: { type: 'string', description: 'audit: originating agent session id' },
         base_url: { type: 'string' },
@@ -404,6 +412,8 @@ async function callTool(name, args) {
       cap: args.today_cap,
       apply: args.apply,
       forceChronic: args.force_chronic,
+      suggestSplit: args.suggest_split,
+      splitParts: args.split_parts,
       why: args.why,
       source_session: args.source_session
     });
