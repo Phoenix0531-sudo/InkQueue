@@ -63,6 +63,29 @@ public class MainActivity extends Activity implements InkMainView.Listener {
         setContentView(mainView);
 
         applyAlwaysOnMode();
+        // v0.9.8: accept adb intent extras to bootstrap sync config without
+        // typing on the e-ink screen. Usage:
+        //   adb shell am start -n dev.inkqueue/.MainActivity \
+        //     --es api_base_url "http://192.168.10.8:8787" \
+        //     --es api_token "dev-token" \
+        //     --es device_id "kindle-pw3"
+        // Any extras present overwrite SharedPreferences; absent extras are
+        // ignored.  This is harmless for normal launcher launches (no extras).
+        Intent intent = getIntent();
+        if (intent != null) {
+            android.content.SharedPreferences.Editor ed = getSharedPreferences(PREFS, 0).edit();
+            boolean changed = false;
+            String url = intent.getStringExtra("api_base_url");
+            if (url != null && url.trim().length() > 0) { ed.putString(SyncService.KEY_API_BASE_URL, url.trim()); changed = true; }
+            String tok = intent.getStringExtra("api_token");
+            if (tok != null && tok.trim().length() > 0) { ed.putString(SyncService.KEY_AUTH, tok.trim()); changed = true; }
+            String did = intent.getStringExtra("device_id");
+            if (did != null && did.trim().length() > 0) { ed.putString(SyncService.KEY_DEVICE_ID, did.trim()); changed = true; }
+            if (changed) {
+                ed.apply();
+                android.util.Log.i("InkQueue", "applied intent extras: api_base_url=" + url);
+            }
+        }
         renderLocal();
         // (Re)arm the periodic background sync alarm from current prefs.
         // On Android 4.4 the alarm survives boot only if a BroadcastReceiver
