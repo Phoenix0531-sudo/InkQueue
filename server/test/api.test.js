@@ -1062,3 +1062,81 @@ test('writeStore atomic: stale .tmp from a prior crash does not corrupt next wri
   assert.ok(reloaded.tasks.some((t) => t.id === 't_atomic'));
   assert.ok(!fs.existsSync(dataFile + '.tmp'), '.tmp consumed by rename');
 });
+
+// ── M3: store size guard ──────────────────────────────────────────────
+// INKQUEUE_MAX_STORE_BYTES soft-warns when tasks.json grows large enough
+// to hurt snapshot latency or risk OOM on the 512MB Kindle.
+
+test('readStore warns when tasks.json exceeds INKQUEUE_MAX_STORE_BYTES', () => {
+  const dataFile = process.env.INKQUEUE_DATA_FILE;
+  // Force a tiny threshold so a normal-sized store triggers the warn.
+  process.env.INKQUEUE_MAX_STORE_BYTES = '100'; // 100 bytes
+  delete require.cache[require.resolve('../src/lib/store')];
+  delete require.cache[require.resolve('../src/server')];
+  const { create } = require('../src/lib/store');
+  const storeApi = create({ dataFile });
+  // Capture console.warn
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (msg) => { warns.push(String(msg)); };
+  try {
+    fs.writeFileSync(dataFile, JSON.stringify({ tasks: [{ id: 't_big', title: 'x'.repeat(200), status: 'todo' }], operations: [] }, null, 2));
+    const s = storeApi.readStore();
+    assert.ok(s.tasks.some((t) => t.id === 't_big'));
+    const sizeWarn = warns.find((w) => w.includes('exceeds INKQUEUE_MAX_STORE_BYTES'));
+    assert.ok(sizeWarn, 'should have warned about oversized store');
+    assert.ok(sizeWarn.includes('tasks=1'), 'warn includes task count');
+  } finally {
+    console.warn = origWarn;
+    delete process.env.INKQUEUE_MAX_STORE_BYTES;
+    delete require.cache[require.resolve('../src/lib/store')];
+    delete require.cache[require.resolve('../src/server')];
+    require('../src/server');
+  }
+});
+
+test('readStore does NOT warn when store is below threshold', () => {
+  const dataFile = process.env.INKQUEUE_DATA_FILE;
+  process.env.INKQUEUE_MAX_STORE_BYTES = '1048576'; // 1MB
+  delete require.cache[require.resolve('../src/lib/store')];
+  const { create } = require('../src/lib/store');
+  const storeApi = create({ dataFile });
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (msg) => { warns.push(String(msg)); };
+  try {
+    fs.writeFileSync(dataFile, JSON.stringify({ tasks: [{ id: 't_small', title: 'tiny', status: 'todo' }], operations: [] }, null, 2));
+    const s = storeApi.readStore();
+    assert.ok(s.tasks.some((t) => t.id === 't_small'));
+    const sizeWarn = warns.find((w) => w.includes('exceeds INKQUEUE_MAX_STORE_BYTES'));
+    assert.ok(!sizeWarn, 'no size warn for small store');
+  } finally {
+    console.warn = origWarn;
+    delete process.env.INKQUEUE_MAX_STORE_BYTES;
+    delete require.cache[require.resolve('../src/lib/store')];
+    require('../src/server');
+  }
+});
+
+test('INKQUEUE_MAX_STORE_BYTES=0 disables the size guard', () => {
+  const dataFile = process.env.INKQUEUE_DATA_FILE;
+  process.env.INKQUEUE_MAX_STORE_BYTES = '0';
+  delete require.cache[require.resolve('../src/lib/store')];
+  const { create } = require('../src/lib/store');
+  const storeApi = create({ dataFile });
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (msg) => { warns.push(String(msg)); };
+  try {
+    fs.writeFileSync(dataFile, JSON.stringify({ tasks: [{ id: 't_disabled', title: 'x'.repeat(500), status: 'todo' }], operations: [] }, null, 2));
+    const s = storeApi.readStore();
+    assert.ok(s.tasks.some((t) => t.id === 't_disabled'));
+    const sizeWarn = warns.find((w) => w.includes('exceeds INKQUEUE_MAX_STORE_BYTES'));
+    assert.ok(!sizeWarn, 'guard disabled with 0');
+  } finally {
+    console.warn = origWarn;
+    delete process.env.INKQUEUE_MAX_STORE_BYTES;
+    delete require.cache[require.resolve('../src/lib/store')];
+    require('../src/server');
+  }
+});

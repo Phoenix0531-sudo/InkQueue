@@ -12,6 +12,28 @@ const path = require('path');
 function create({ dataFile }) {
   const DATA_FILE = dataFile;
 
+  // Size guard for the JSON store. Read parses fine, but a multi-MB tasks.json
+  // degrades snapshot latency and risks exhausting the 512MB Kindle heap when
+  // it pulls. Soft warn by default; INKQUEUE_MAX_STORE_BYTES=0 disables.
+  const MAX_STORE_BYTES = Number(process.env.INKQUEUE_MAX_STORE_BYTES) || (5 * 1024 * 1024);
+
+  function warnIfStoreOversized(filePath, store) {
+    if (!MAX_STORE_BYTES) return;
+    try {
+      const stat = fs.statSync(filePath);
+      const bytes = stat.size;
+      if (bytes > MAX_STORE_BYTES) {
+        const taskCount = Array.isArray(store && store.tasks) ? store.tasks.length : -1;
+        const opCount = Array.isArray(store && store.operations) ? store.operations.length : -1;
+        console.warn(
+          '[inkqueue-server] store exceeds INKQUEUE_MAX_STORE_BYTES=' + MAX_STORE_BYTES +
+          ' (actual=' + bytes + 'B, tasks=' + taskCount + ', operations=' + opCount + '). ' +
+          'Consider pruning archived tasks or compacting operations log.'
+        );
+      }
+    } catch (_) { /* best-effort; missing file already handled by caller */ }
+  }
+
   function emptyStore() {
     return { tasks: [], operations: [] };
   }
@@ -57,7 +79,9 @@ function create({ dataFile }) {
   function readStore() {
     ensureDataFile();
     try {
-      return tryLoadStoreFrom(DATA_FILE);
+      const s = tryLoadStoreFrom(DATA_FILE);
+      warnIfStoreOversized(DATA_FILE, s);
+      return s;
     } catch (e) {
       console.warn('[inkqueue-server] primary store corrupt:', e.message);
       const candidates = [backupPath(''), backupPath(1), backupPath(2)];
@@ -86,6 +110,7 @@ function create({ dataFile }) {
         }
         fs.writeFileSync(DATA_FILE, JSON.stringify(fresh, null, 2));
       } catch (_) {}
+      warnIfStoreOversized(DATA_FILE, fresh);
       return fresh;
     }
   }
