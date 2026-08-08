@@ -12,7 +12,7 @@ process.env.INKQUEUE_DATA_FILE = path.join(tmpDir, 'tasks.json');
 process.env.INKQUEUE_CONFIG_FILE = path.join(tmpDir, 'config.json');
 process.env.INKQUEUE_TOKEN = 'dev-token';
 
-const { start, readStore, validateStartupConfig } = require('../src/server');
+const { start, readStore, writeStore, validateStartupConfig } = require('../src/server');
 
 function request(baseUrl, pathname, options = {}) {
   const headers = Object.assign({}, options.headers || {});
@@ -997,4 +997,68 @@ test('TLS env: server starts HTTPS when INKQUEUE_TLS_KEY/CERT set', async () => 
   } finally {
     try { fs.rmSync(certDir, { recursive: true, force: true }); } catch (_) {}
   }
+});
+
+// ── M2: store self-heal fuzz ──────────────────────────────────────────
+// Simulates a torn tmp write (atomic rename guarantees the primary is never
+// half-written, but a crash mid-rename can leave a stale .tmp; if someone
+// manually copies that .tmp over the primary, readStore must still heal).
+// Also covers: all backups corrupt → empty-store fallback; .bak.1 rotation
+// priority; truncated JSON (prefix of valid file) heal.
+
+test('readStore heals when primary is a torn-tmp fragment (prefix of valid JSON)', () => {
+  const dataFile = process.env.INKQUEUE_DATA_FILE;
+  const good = { tasks: [{ id: 't_torn', title: 'torn survivor', status: 'todo' }], operations: [] };
+  // Seed .bak with known-good content.
+  fs.writeFileSync(dataFile + '.bak', JSON.stringify(good, null, 2));
+  // Write a partial prefix of valid JSON to primary (simulates half-flush).
+  const fullJson = JSON.stringify(good, null, 2);
+  fs.writeFileSync(dataFile, fullJson.slice(0, Math.floor(fullJson.length / 2)));
+  const store = readStore();
+  assert.ok(store.tasks.some((t) => t.id === 't_torn'), 'healed from .bak despite torn primary');
+  // Primary should be rewritten as a valid heal.
+  const reloaded = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+  assert.ok(reloaded.tasks.some((t) => t.id === 't_torn'));
+});
+
+test('readStore falls back to .bak.1 when .bak also corrupt', () => {
+  const dataFile = process.env.INKQUEUE_DATA_FILE;
+  // Clean any leftover backups from prior tests
+  for (const ext of ['.bak', '.bak.1', '.bak.2']) {
+    try { fs.unlinkSync(dataFile + ext); } catch (_) {}
+  }
+  const older = { tasks: [{ id: 't_bak1', title: 'older backup', status: 'todo' }], operations: [] };
+  fs.writeFileSync(dataFile + '.bak.1', JSON.stringify(older, null, 2));
+  fs.writeFileSync(dataFile + '.bak', '{corrupt');
+  fs.writeFileSync(dataFile, '}{nonsense');
+  const store = readStore();
+  assert.ok(store.tasks.some((t) => t.id === 't_bak1'), 'fell back to .bak.1');
+});
+
+test('readStore returns empty store when primary and all backups are corrupt', () => {
+  const dataFile = process.env.INKQUEUE_DATA_FILE;
+  for (const ext of ['', '.bak', '.bak.1', '.bak.2']) {
+    fs.writeFileSync(dataFile + ext, '{not-json-at-all');
+  }
+  const store = readStore();
+  assert.ok(Array.isArray(store.tasks) && store.tasks.length === 0, 'empty-store fallback');
+  assert.ok(Array.isArray(store.operations) && store.operations.length === 0);
+  // Primary should be rewritten as a valid empty store.
+  const reloaded = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+  assert.equal(reloaded.tasks.length, 0);
+  // The corrupt primary should have been archived as .corrupt.<ts>.
+  const siblings = fs.readdirSync(path.dirname(dataFile));
+  const corruptArchives = siblings.filter((n) => n.includes('.corrupt.'));
+  assert.ok(corruptArchives.length >= 1, 'corrupt primary archived for post-mortem');
+});
+
+test('writeStore atomic: stale .tmp from a prior crash does not corrupt next write', () => {
+  const dataFile = process.env.INKQUEUE_DATA_FILE;
+  // Simulate a crash that left a stale .tmp behind.
+  fs.writeFileSync(dataFile + '.tmp', 'STALE garbage from a previous crash');
+  // Next writeStore should overwrite .tmp and rename cleanly.
+  writeStore({ tasks: [{ id: 't_atomic', title: 'fresh write', status: 'todo' }], operations: [] });
+  const reloaded = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+  assert.ok(reloaded.tasks.some((t) => t.id === 't_atomic'));
+  assert.ok(!fs.existsSync(dataFile + '.tmp'), '.tmp consumed by rename');
 });
