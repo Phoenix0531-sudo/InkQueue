@@ -1,6 +1,6 @@
 {
   "name": "inkqueue-reference-server",
-  "version": "0.1.0",
+  "version": "0.9.7",
   "private": true,
   "description": "Reference JSON-file API server for InkQueue v0.1",
   "main": "src/server.js",
