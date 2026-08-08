@@ -6,6 +6,7 @@ android/.gradle/
 android/build/
 android/app/build/
 android/local.properties
+docs/research/probe-artifacts/
 server/node_modules/
 server/data/*.tmp
 server/data/config.json

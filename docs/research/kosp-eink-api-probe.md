@@ -1,9 +1,11 @@
 # KOSP / CracKDroid vendor e-ink partial-API probe — H4 research findings
 
-> Status: **source-static probe complete** (MollySophia/android_hardware_imx).
-> Device-side live probing (sysfs / strace / launcher reverse) pending —
-> blocked on USB-attached Kindle. The static findings below are sufficient
-> to conclude that KOSP **does** expose a partial-refresh API to userspace.
+> Status: **source-static + live device probe complete** (MollySophia/
+> android_hardware_imx + USB-attached PW3 `4.0-rc2`).
+> The static findings below initially suggested that KOSP exposed a
+> partial-refresh API to userspace; the live probe (Section
+> "Device-side live probe", 2026-08-08) supersedes several of those
+> conclusions — see "Updated conclusions" for the deltas.
 
 This is research evidence only, not a skill reference.姊妹 notes live in the
 Hermes skill `eink-agent-terminals → references/kosp-eink-probe.md`
@@ -186,3 +188,197 @@ Pending both conditions, fast refresh is a documented-but-deferred capability.
 - InkQueue project side-note: this probe was completed as part of the
   v0.9.7 milestone's H4 batch alongside H1 (StoreBackend abstraction),
   H2 (reverse-notify via snapshot), and H3 (GitHub Actions CI).
+
+
+## Device-side live probe (2026-08-08, USB-attached PW3)
+
+Device: Kindle PW3 (IMX6SL), Android 4.4.2 / KOSP `4.0-rc2 dev-keys`
+(fingerprint `Freescale/kindlemod/kindlemod:4.4.2/4.0-rc2/20151130:user/dev-keys`).
+Captured via `adb shell` + `adb pull`. Raw artifacts in
+`docs/research/probe-artifacts/`.
+
+### framebuffer (`/dev/graphics/fb0`)
+
+```
+char dev 29:0   mode 0660  owner system:graphics
+bits_per_pixel : 16
+stride         : 2176
+virtual_size   : 1088,3072
+```
+
+Permissions already tell the key constraint: opening fb0 from a normal
+app requires membership in the `graphics` group, which user-installed
+apps (uid 10000+) do **not** receive on this build. Direct
+`MXCFB_SEND_UPDATE` ioctl from InkQueue is therefore blocked at the
+fs-permission layer regardless of whether the ioctl itself is wired.
+
+### EPDC platform driver (`/sys/devices/platform/imx_epdc_fb/`)
+
+The driver is loaded and exposes 8 sysfs nodes (significantly different
+path from the H4-predicted `imx_epdc.0`):
+
+| node                     | captured value                                |
+|--------------------------|-----------------------------------------------|
+| `mxc_epdc_debug`         | `0`                                           |
+| `mxc_epdc_update`        | `1`                                           |
+| `mxc_epdc_powerup`       | `0`                                           |
+| `mxc_epdc_pwrdown`       | `0`                                           |
+| `mxc_epdc_reagl`         | `0`                                           |
+| `mxc_epdc_regs`          | (binary)                                       |
+| `mxc_epdc_temperature`   | `4097` (driver-internal sensor selector, not Celsius) |
+| `mxc_epdc_voltcontrol`   | VPOS +15 mV / VNEG -15 mV / VDDH +25 mV / VEE -20 mV / VCOM_OFFSET 0 |
+| `mxc_epdc_waveform_modes`| see table below                                |
+| `mxc_epdc_wvaddr`        | (binary waveform table physical address)       |
+
+`mxc_epdc_waveform_modes` actual on-device content:
+
+```
+mode_version:0x19
+init     :0x0
+du       :0x1
+du4      :0x7
+gc16f    :0x2
+gc16     :0x2
+gc4      :0x2
+gl4      :0x7
+gl16inv  :0x2
+gl16f    :0x3
+```
+
+**Critical divergence from the static H4 finding**: the on-device
+waveform table has **no `a2` entry**. The `KINDLE_WAVEFORM_MODE_A2=0x4`
+macro defined in `gralloc_epdc.h` does not correspond to a waveform
+loaded into this PW3's EPDC controller. Requesting A2 from userspace
+would silently fall back to whatever the driver picks (likely `gc16`).
+This rules out the fast-A2-partial-for-crisp-UI-deltas optimisation
+that motivated the original ioctl exploration. The kind of fast refresh
+we want is not available on this build.
+
+### Vendor binaries (`/system/lib/hw/`)
+
+Pulled and string-scanned:
+
+- `gralloc.imx6.so` (194 888 B): opens `/dev/graphics/fb%u` and issues
+  `FBIOBLANK` ioctl. **No** `MXCFB_SEND_UPDATE` symbol or `mxcfb_*`
+  struct name is referenced by this `.so`. The MollySophia source tree
+  contains the call site, but the KOSP-published `.so` was either built
+  from a tree that pruned it or stripped the symbol. Either way,
+  gralloc itself does not drive partial refresh on this device.
+- `hwcomposer.imx6.so` (285 092 B): references
+  `/sys/devices/platform/epdc_ctl/value`, `/dev/graphics/fb%d`,
+  `/sys/class/graphics/fb%d`, `FBIOGET_VSCREENINFO`, `FBIOBLANK`, plus
+  HDMI paths (`mxc_hdmi`, `sii902x.0`). The `epdc_ctl/value` path is
+  hard-coded into the binary but **does not exist on the live
+  filesystem** (`/sys/devices/platform/epdc_ctl/` returns
+  "No such file or directory"). The compiled-in path is dead; the
+  composer falls through to the fb0 path.
+
+Stored at:
+- `docs/research/probe-artifacts/gralloc.imx6.so`
+- `docs/research/probe-artifacts/hwcomposer.imx6.so`
+- `docs/research/probe-artifacts/Eink.apk` (KOSP config tool, no JNI)
+- `docs/research/probe-artifacts/Eink.dex` (extracted)
+
+### KOSP-bundled EPD config tool — `com.example.xu.myapplication` (Eink.apk)
+
+- `/system/app/Eink.apk`, 68 154 B, single Activity, **no native
+  library** (no `lib/*/so`).
+- `versionName=4.4.2-20151130`, `targetSdk=19`, no special permissions.
+- The DEX never references `ioctl`, `MXCFB_*`, `epdc`, or
+  `/dev/graphics` — it manages **KOSP user-pref `.dat` config files**
+  in `/data/local/tmp/`: `eink_mode.dat`, `refresh.dat`,
+  `dither_mode.dat`, `fontcolor.dat`, `fonthint.dat`, `fontmono.dat`,
+  `gain.dat`, `gamma.dat`, `kindhack.dat`, `pivot.dat`,
+  `pressure.dat`, `ref_enable.dat`, `reversekey.dat`, `userlight.dat`,
+  `volumekey.dat`.
+- Manifest only registers `MAIN`/`LAUNCHER`; broadcasts a few
+  stock-system intents (`ACTION_REQUEST_SHUTDOWN`, `REBOOT`,
+  `BATTERY_CHANGED`). It does **not** expose a custom refresh /
+  EPD-trigger broadcast — there is no `Intent("dev.inkqueue.REFRESH")`
+  hook anywhere in the system image.
+
+### `init.svc.eink` property
+
+`getprop` reports `init.svc.eink=stopped`. KOSP's `init.rc` defines a
+service named `eink`, but it is **not running** — likely dead code from
+an earlier KOSP build that was migrated into the kernel module + sysfs
+path. It does not appear to expose any userspace hook on this build.
+
+## Updated conclusions (vs. the static H4 hypotheses)
+
+1. The static "userspace app can open `/dev/graphics/fb0` + ioctl
+   `MXCFB_SEND_UPDATE` for fast partial" hypothesis is **rejected**
+   on the live PW3:
+   - Perms on `fb0` are `0660 system:graphics`. User apps get neither
+     the `graphics` group nor the `system` uid; `open()` returns
+     `EACCES` before any `ioctl` can be issued.
+   - The `a2` waveform mode that motivated fast UI partial-refresh is
+     **absent** from the live driver's waveform table. Even on rooted
+     builds, requesting `KINDLE_WAVEFORM_MODE_A2=0x4` does nothing
+     useful here.
+2. The "SurfaceFlinger is signalled by writing
+   `/sys/devices/platform/epdc_ctl/value`" hypothesis is **also
+   rejected** — that path is hard-coded into `hwcomposer.imx6.so` but
+   **does not exist on the live filesystem**. KOSP's hwcomposer is
+   effectively in fallback mode on this ROM.
+3. The actual refresh path on PW3/KOSP is the **default one**:
+   `View.invalidate()` -> Choreographer -> SurfaceFlinger ->
+   hwcomposer -> fb0 mmap -> mxc_epdc_fb kernel driver. No userspace
+   trickery is required or available.
+4. InkQueue's v0.9.7 decision to **defer** direct vendor-ioctl EPD
+   integration is now justified on the stronger ground that the
+   runtime does **not** expose a working partial-refresh API at all
+   on this ROM build — not merely that it would be a UX/size
+   trade-off. Revisit only if a future KOSP build (i) restores
+   `/sys/.../epdc_ctl/`, (ii) loads an `a2`-capable waveform table,
+   or (iii) ships a vendor-blessed refresh service.
+
+## What this changes for InkQueue
+
+- The post-v0.9.7 roadmap tentatively had "evaluate direct-ioctl fast
+  refresh on PW3". That item is **dropped** — the on-device evidence
+  forecloses it.
+- The realistic fast-refresh options remain:
+  - Accept framework-mediated refresh and accept the e-ink ghosting
+    tradeoff; or
+  - Migrate to a Canvas-only UI that issues no per-frame `invalidate`
+    except on real content changes (InkQueue already does this); or
+  - Wait for post-4.4 KOSP releases that ship a configured `epdc_ctl`
+    sysfs and an `a2` waveform.
+- v0.9.7's `~60 KB` APK budget and framework-mediated redraws remain
+  correct for this ROM.
+
+## Repro (device-attached)
+
+```bash
+ADB=.tools/android-sdk/platform-tools/adb.exe
+
+# Verify EPDC platform driver
+$ADB shell ls /sys/devices/platform/imx_epdc_fb/
+$ADB shell cat /sys/devices/platform/imx_epdc_fb/mxc_epdc_waveform_modes
+
+# Verify the dead-end epdc_ctl path
+$ADB shell ls /sys/devices/platform/epdc_ctl/  # -> No such file or directory
+
+# Verify fb0 perms
+$ADB shell ls -la /dev/graphics/fb0           # -> system:graphics 0660
+
+# Pull vendor .so for inspection
+$ADB pull /system/lib/hw/gralloc.imx6.so docs/research/probe-artifacts/
+$ADB pull /system/lib/hw/hwcomposer.imx6.so docs/research/probe-artifacts/
+
+# Strings for EPDC references
+strings docs/research/probe-artifacts/gralloc.imx6.so | grep -iE 'epdc|mxcfb|fb0'
+strings docs/research/probe-artifacts/hwcomposer.imx6.so | grep -iE 'epdc|mxcfb|fb0'
+
+# Pull the KOSP-bundled EPD config tool
+$ADB pull /system/app/Eink.apk docs/research/probe-artifacts/
+```
+
+## Additional references (device-side)
+
+- `init.svc.eink` getprop entry (KOSP init service that is *stopped*).
+- `ro.build.fingerprint=Freescale/kindlemod/kindlemod:4.4.2/4.0-rc2/20151130:user/dev-keys`.
+- `/system/lib/hw/gralloc.EVK.so.bak` + `hwcomposer.EVK.so.bak` — old
+  EVK board blobs retained as `.bak` (informational, not used at
+  runtime).
