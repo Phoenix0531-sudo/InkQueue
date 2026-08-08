@@ -1140,3 +1140,193 @@ test('INKQUEUE_MAX_STORE_BYTES=0 disables the size guard', () => {
     require('../src/server');
   }
 });
+
+// ── H1: StoreBackend abstraction ────────────────────────────────────────
+const { JsonFileBackend } = require('../src/lib/backends/json-file');
+const { D1Backend }      = require('../src/lib/backends/d1');
+const { SqliteBackend }  = require('../src/lib/backends/sqlite');
+
+test('H1: store.create returns JsonFileBackend by default and re-exports the v0.9.5 surface', () => {
+  const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'h1-'));
+  const dataFile2 = path.join(tmpDir2, 'tasks.json');
+  try {
+    const storeApi = require('../src/lib/store').create({ dataFile: dataFile2 });
+    assert.ok(storeApi._backend instanceof JsonFileBackend,
+      '_backend should be JsonFileBackend instance');
+    // The v0.9.5 method surface must all exist
+    for (const m of ['emptyStore','ensureDataFile','backupPath','rotateStoreBackups',
+                     'tryLoadStoreFrom','readStore','writeStore','operationStore']) {
+      assert.strictEqual(typeof storeApi[m], 'function', m + ' missing');
+    }
+    // Default DATA_FILE should be the one we passed
+    assert.strictEqual(storeApi.DATA_FILE, dataFile2);
+    // Round-trip
+    storeApi.writeStore({ tasks: [{ id: 't_h1', title: 'x', status: 'todo' }], operations: [] });
+    const s = storeApi.readStore();
+    assert.ok(s.tasks.some((t) => t.id === 't_h1'));
+  } finally {
+    try { fs.rmSync(tmpDir2, { recursive: true, force: true }); } catch (_) {}
+  }
+});
+
+test('H1: selectBackend rejects unknown name; json-file/json/empty all map to JsonFileBackend', () => {
+  const { selectBackend } = require('../src/lib/store');
+  for (const ok of ['json-file','json','']) {
+    const b = selectBackend({ dataFile: '/tmp/x', backendHint: ok });
+    assert.ok(b instanceof JsonFileBackend, 'hint='+JSON.stringify(ok)+' should give JsonFileBackend');
+  }
+  assert.throws(() => selectBackend({ dataFile: '/tmp/x', backendHint: 'mongo' }),
+    /unknown INKQUEUE_STORE_BACKEND/);
+});
+
+test('H1: D1 and Sqlite stubs throw on live methods but expose the contract shape', () => {
+  const d1 = new D1Backend('/tmp/d1.json');
+  assert.deepStrictEqual(d1.emptyStore(), { tasks: [], operations: [], notices: [] });
+  assert.throws(() => d1.readStore(), /D1Backend.readStore\(\) not implemented/);
+  assert.throws(() => d1.writeStore({}), /D1Backend.writeStore\(\) not implemented/);
+  assert.strictEqual(d1.backupPath(), '');
+  d1.rotateStoreBackups(); // no-op, should not throw
+  const s = { operations: [{ id: 'op_x' }] };
+  const ops = d1.operationStore(s);
+  assert.strictEqual(ops.length, 1);
+
+  const sql = new SqliteBackend('/tmp/sql.json');
+  assert.deepStrictEqual(sql.emptyStore(), { tasks: [], operations: [], notices: [] });
+  assert.throws(() => sql.readStore(), /SqliteBackend.readStore\(\) not implemented/);
+  assert.throws(() => sql.writeStore({}), /SqliteBackend.writeStore\(\) not implemented/);
+});
+
+
+// ── H2: reverse-notify via snapshot ─────────────────────────────────────
+// Notice helpers using the existing `request(baseUrl, path, opts)` and
+// `start(0)` pattern from earlier in this file.
+async function startSvr() {
+  const server = start(0);
+  await new Promise((r) => server.once('listening', r));
+  const baseUrl = `http://localhost:${server.address().port}`;
+  return { server, baseUrl };
+}
+
+async function postJson(baseUrl, pathname, bodyObj) {
+  const res = await request(baseUrl, pathname, {
+    method: 'POST',
+    headers: { 'X-InkQueue-Token': 'dev-token' },
+    json: bodyObj
+  });
+  let json = null;
+  try { json = await res.json(); } catch (_) {}
+  return { status: res.status, json };
+}
+
+async function getJson(baseUrl, pathname) {
+  const res = await request(baseUrl, pathname, {
+    headers: { 'X-InkQueue-Token': 'dev-token' }
+  });
+  let json = null;
+  try { json = await res.json(); } catch (_) {}
+  return { status: res.status, json };
+}
+
+test('H2: POST /v1/agent/notices persists and shows up in snapshot', async () => {
+  const { server, baseUrl } = await startSvr();
+  try {
+    const created = await postJson(baseUrl, '/v1/agent/notices', {
+      title: '从 Agent 来的提醒',
+      body: '今天别忘了看 DEM',
+      kind: 'remind',
+      device_id: 'kindle-pw3'
+    });
+    assert.strictEqual(created.status, 201);
+    const notice = (created.json || {}).notice;
+    assert.ok(notice && notice.id && /^notice_/.test(notice.id));
+    assert.strictEqual(notice.kind, 'remind');
+    assert.strictEqual(notice.device_id, 'kindle-pw3');
+    assert.ok(!notice.dismissed_by);
+
+    // Broadcast notice (device_id omitted) — should reach any device.
+    const bc = await postJson(baseUrl, '/v1/agent/notices', { title: '全员周报提醒' });
+    assert.strictEqual(bc.status, 201);
+
+    // Snapshot for the addressed device — both should appear.
+    const snap = await getJson(baseUrl, '/v1/tasks/snapshot?device_id=kindle-pw3');
+    assert.strictEqual(snap.status, 200);
+    const notices = (snap.json || {}).agent_notices || [];
+    const ids = notices.map((n) => n.id);
+    assert.ok(ids.includes(notice.id), 'addressed notice should be in snapshot');
+    assert.ok(bc.json && ids.includes(bc.json.notice.id), 'broadcast notice should also appear');
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test('H2: notices addressed to a different device do not leak into another snapshot', async () => {
+  const { server, baseUrl } = await startSvr();
+  try {
+    const created = await postJson(baseUrl, '/v1/agent/notices', {
+      title: '只给 kindle-pw4',
+      device_id: 'kindle-pw4'
+    });
+    assert.strictEqual(created.status, 201);
+    const snap = await getJson(baseUrl, '/v1/tasks/snapshot?device_id=kindle-pw3');
+    const notices = (snap.json || {}).agent_notices || [];
+    assert.ok(!notices.some((n) => n.id === (created.json || {}).notice.id),
+      'notice addressed to kindle-pw4 must NOT leak into kindle-pw3 snapshot');
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test('H2: POST /v1/notices/:id/dismiss marks notice read so it stops re-appearing', async () => {
+  const { server, baseUrl } = await startSvr();
+  try {
+    const created = await postJson(baseUrl, '/v1/agent/notices', {
+      title: '准备做总结',
+      device_id: 'kindle-pw3'
+    });
+    const id = (created.json || {}).notice.id;
+    // Dismiss from the kindle-pw3 side.
+    const dismissed = await postJson(baseUrl, '/v1/notices/' + id + '/dismiss', { device_id: 'kindle-pw3' });
+    assert.strictEqual(dismissed.status, 200);
+    assert.strictEqual((dismissed.json || {}).notice.dismissed_by, 'kindle-pw3');
+    assert.ok((dismissed.json || {}).notice.dismissed_at);
+    // Next snapshot for the same device no longer includes it.
+    const snap = await getJson(baseUrl, '/v1/tasks/snapshot?device_id=kindle-pw3');
+    const ids = ((snap.json || {}).agent_notices || []).map((n) => n.id);
+    assert.ok(!ids.includes(id), 'dismissed notice must not re-appear');
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test('H2: dismiss is idempotent — second dismiss from another device does not overwrite the first', async () => {
+  const { server, baseUrl } = await startSvr();
+  try {
+    const created = await postJson(baseUrl, '/v1/agent/notices', {
+      title: '全员 once'
+    });
+    const id = (created.json || {}).notice.id;
+    const first = await postJson(baseUrl, '/v1/notices/' + id + '/dismiss', { device_id: 'kindle-pw3' });
+    assert.strictEqual(first.json.notice.dismissed_by, 'kindle-pw3');
+    const first_at = first.json.notice.dismissed_at;
+    // Tiny delay to ensure a different timestamp if it overwrote.
+    await new Promise((r) => setTimeout(r, 50));
+    const second = await postJson(baseUrl, '/v1/notices/' + id + '/dismiss', { device_id: 'kindle-pw4' });
+    assert.strictEqual(second.status, 200);
+    assert.strictEqual(second.json.notice.dismissed_by, 'kindle-pw3', 'first dismiss wins');
+    assert.strictEqual(second.json.notice.dismissed_at, first_at, 'dismissed_at unchanged');
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test('H2: invalid notice body returns 400 (no title)', async () => {
+  const { server, baseUrl } = await startSvr();
+  try {
+    const r = await postJson(baseUrl, '/v1/agent/notices', { body: 'no title' });
+    assert.strictEqual(r.status, 400);
+    const msg = (r.json || {}).error || '';
+    assert.ok(/title required/.test(msg), 'error should mention title required: ' + msg);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});

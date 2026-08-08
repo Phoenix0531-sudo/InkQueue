@@ -171,7 +171,23 @@ async function handleRequest(req, res) {
       const stat = fs.statSync(DATA_FILE);
       headers['Last-Modified'] = stat.mtime.toUTCString();
     } catch (_) {}
-    sendJson(res, 200, { server_time: nowIso(), tasks: s.tasks.map(publicTask) }, headers); return;
+    // H2 reverse-notify: pass through unread notices addressed to this
+    // device (or broadcast to all). device_id query param controls whom
+    // the snapshot is being served to; notices with device_id=null fan
+    // out to everyone. The client is expected to POST /v1/notices/:id/dismiss
+    // once the user has read them, so the same notice will not re-appear
+    // on the next sync.
+    const forDevice = url.searchParams.get('device_id') || url.searchParams.get('device') || '';
+    const visibleNotices = (Array.isArray(s.notices) ? s.notices : []).filter((n) => {
+      if (!n || n.dismissed_by) return false;
+      if (!n.device_id) return true;                 // broadcast
+      return n.device_id === forDevice;              // addressed to this device
+    });
+    sendJson(res, 200, {
+      server_time: nowIso(),
+      tasks: s.tasks.map(publicTask),
+      agent_notices: visibleNotices
+    }, headers); return;
   }
 
   if (req.method === 'GET' && url.pathname === '/v1/events') {
@@ -349,6 +365,51 @@ async function handleRequest(req, res) {
     if (eventId) evStore.push({ webhook_event_id: eventId, applied_at: nowIso() });
     writeStore(s);
     sendJson(res, 200, { server_time: nowIso(), event_id: eventId, duplicate: false, created, updated }); return;
+  }
+
+  // ── H2 reverse-notify: Agent → Kindle via snapshot ────────────────────
+  // Agent pushes a notice here; on the next sync the device pulls it from
+  // /v1/tasks/snapshot?device_id=… and surfaces it in the UI. When the user
+  // reads/dismisses it the client POSTs /v1/notices/:id/dismiss so it stops
+  // being relayed. device_id=null broadcasts to every device.
+  if (req.method === 'POST' && url.pathname === '/v1/agent/notices') {
+    const input = await httpMod.readBody(req);
+    if (!input || typeof input !== 'object') throw new HttpError(400, 'invalid body');
+    if (!input.title || !String(input.title).trim()) throw new HttpError(400, 'title required');
+    const s = readStore();
+    if (!Array.isArray(s.notices)) s.notices = [];
+    const notice = {
+      id: generatedId('notice'),
+      title: String(input.title).trim().slice(0, 200),
+      body: input.body != null ? String(input.body).slice(0, 1024) : null,
+      kind: ['info','remind','warn'].includes(input.kind) ? input.kind : 'info',
+      // device_id: null (or '' / omitted) → broadcast to every device;
+      // explicit string → addressed to that device only.
+      device_id: input.device_id ? String(input.device_id).slice(0, 64) : null,
+      created_at: nowIso(),
+      dismissed_by: null,             // device_id that dismissed, once any does
+      dismissed_at: null
+    };
+    s.notices.push(notice);
+    writeStore(s);
+    sendJson(res, 201, { server_time: nowIso(), notice }); return;
+  }
+
+  if (req.method === 'POST' && url.pathname.startsWith('/v1/notices/') && url.pathname.endsWith('/dismiss')) {
+    const match = url.pathname.match(/^\/v1\/notices\/([^/]+)\/dismiss$/);
+    if (!match) { sendJson(res, 400, { error: 'invalid notice dismiss path' }); return; }
+    const noticeId = decodeURIComponent(match[1]);
+    const input = await httpMod.readBody(req).catch(() => ({}));
+    const s = readStore();
+    const notices = Array.isArray(s.notices) ? s.notices : [];
+    const idx = notices.findIndex((n) => n && n.id === noticeId);
+    if (idx < 0) { sendJson(res, 404, { error: 'notice not found' }); return; }
+    if (!notices[idx].dismissed_by) {
+      notices[idx].dismissed_by = (input && input.device_id) ? String(input.device_id).slice(0, 64) : 'unknown';
+      notices[idx].dismissed_at = nowIso();
+      writeStore(s);
+    }
+    sendJson(res, 200, { server_time: nowIso(), notice: notices[idx] }); return;
   }
 
   sendJson(res, 404, { error: 'not found' });

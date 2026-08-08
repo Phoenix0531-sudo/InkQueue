@@ -1,144 +1,58 @@
 'use strict';
 
-// JSON-file store for the reference server.
-// Production deployments should drop in a KV/D1-backed implementation
-// that implements the same surface (read/write + operations sub-array).
+// StoreBackend factory.
 //
-// module level state: rotating backups + .tmp atomic rename.
+// The server calls `require('./lib/store').create({ dataFile })` and gets back
+// an object exposing readStore/writeStore/operationStore/emptyStore/
+// ensureDataFile/backupPath/rotateStoreBackups/tryLoadStoreFrom/DATA_FILE —
+// the same surface the rest of the codebase has always called.
+//
+// Internally it now picks a StoreBackend implementation. The default
+// JsonFileBackend (lib/backends/json-file.js) reproduces the exact behavior
+// shipped through v0.9.5: .tmp atomic rename + rotating .bak/.bak.1/.bak.2
+// backups + corrupt-file self-heal + size warn keyed on
+// INKQUEUE_MAX_STORE_BYTES + mtime bump for If-Modified-Since.
+//
+// To plug a production backend (Cloudflare D1, SQLite, KV) drop a class under
+// lib/backends/ that implements StoreBackend (see backends/json-file.js for
+// the contract) and select it via INKQUEUE_STORE_BACKEND. Stubs for D1 and
+// SQLite are kept alongside for reference; neither is wired to live traffic.
 
-const fs = require('fs');
-const path = require('path');
+const { JsonFileBackend } = require('./backends/json-file');
 
-function create({ dataFile }) {
-  const DATA_FILE = dataFile;
-
-  // Size guard for the JSON store. Read parses fine, but a multi-MB tasks.json
-  // degrades snapshot latency and risks exhausting the 512MB Kindle heap when
-  // it pulls. Soft warn by default; INKQUEUE_MAX_STORE_BYTES=0 disables.
-  const MAX_STORE_BYTES = Number(process.env.INKQUEUE_MAX_STORE_BYTES) || (5 * 1024 * 1024);
-
-  function warnIfStoreOversized(filePath, store) {
-    if (!MAX_STORE_BYTES) return;
-    try {
-      const stat = fs.statSync(filePath);
-      const bytes = stat.size;
-      if (bytes > MAX_STORE_BYTES) {
-        const taskCount = Array.isArray(store && store.tasks) ? store.tasks.length : -1;
-        const opCount = Array.isArray(store && store.operations) ? store.operations.length : -1;
-        console.warn(
-          '[inkqueue-server] store exceeds INKQUEUE_MAX_STORE_BYTES=' + MAX_STORE_BYTES +
-          ' (actual=' + bytes + 'B, tasks=' + taskCount + ', operations=' + opCount + '). ' +
-          'Consider pruning archived tasks or compacting operations log.'
-        );
-      }
-    } catch (_) { /* best-effort; missing file already handled by caller */ }
+function selectBackend({ dataFile, backendHint }) {
+  const hint = backendHint || process.env.INKQUEUE_STORE_BACKEND || 'json-file';
+  switch (String(hint).toLowerCase()) {
+    case 'json-file':
+    case 'json':
+    case '':
+      return new JsonFileBackend(dataFile);
+    // Future: 'd1' → require('./backends/d1'); 'sqlite' → require('./backends/sqlite');
+    // Stubs in lib/backends/ document the contract but throw on use today.
+    default:
+      throw new Error('unknown INKQUEUE_STORE_BACKEND=' + hint +
+        ' (supported: json-file)');
   }
-
-  function emptyStore() {
-    return { tasks: [], operations: [] };
-  }
-
-  function ensureDataFile() {
-    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-    if (!fs.existsSync(DATA_FILE)) {
-      fs.writeFileSync(DATA_FILE, JSON.stringify(emptyStore(), null, 2));
-    }
-  }
-
-  function backupPath(slot) {
-    return DATA_FILE + '.bak' + (slot ? '.' + slot : '');
-  }
-
-  /** Keep up to 3 rotating backups: .bak, .bak.1, .bak.2 */
-  function rotateStoreBackups() {
-    try {
-      if (!fs.existsSync(DATA_FILE)) return;
-      const b2 = backupPath(2);
-      const b1 = backupPath(1);
-      const b0 = backupPath('');
-      if (fs.existsSync(b2)) { try { fs.unlinkSync(b2); } catch (_) {} }
-      if (fs.existsSync(b1)) { try { fs.renameSync(b1, b2); } catch (_) {} }
-      if (fs.existsSync(b0)) { try { fs.renameSync(b0, b1); } catch (_) {} }
-      fs.copyFileSync(DATA_FILE, b0);
-    } catch (e) {
-      console.warn('[inkqueue-server] backup rotate failed:', e.message);
-    }
-  }
-
-  function tryLoadStoreFrom(filePath) {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    if (!raw.trim()) return emptyStore();
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return { tasks: parsed, operations: [] };
-    if (!parsed || typeof parsed !== 'object') throw new Error('store root not object');
-    if (!Array.isArray(parsed.tasks)) parsed.tasks = [];
-    if (!Array.isArray(parsed.operations)) parsed.operations = [];
-    return parsed;
-  }
-
-  function readStore() {
-    ensureDataFile();
-    try {
-      const s = tryLoadStoreFrom(DATA_FILE);
-      warnIfStoreOversized(DATA_FILE, s);
-      return s;
-    } catch (e) {
-      console.warn('[inkqueue-server] primary store corrupt:', e.message);
-      const candidates = [backupPath(''), backupPath(1), backupPath(2)];
-      for (const c of candidates) {
-        try {
-          if (!fs.existsSync(c)) continue;
-          const recovered = tryLoadStoreFrom(c);
-          console.warn('[inkqueue-server] recovered store from', c);
-          try {
-            const tmp = DATA_FILE + '.heal';
-            fs.writeFileSync(tmp, JSON.stringify(recovered, null, 2));
-            fs.renameSync(tmp, DATA_FILE);
-          } catch (w) {
-            console.warn('[inkqueue-server] heal write failed:', w.message);
-          }
-          return recovered;
-        } catch (be) {
-          console.warn('[inkqueue-server] backup unusable', c, be.message);
-        }
-      }
-      console.warn('[inkqueue-server] no usable backup; starting empty store');
-      const fresh = emptyStore();
-      try {
-        if (fs.existsSync(DATA_FILE)) {
-          fs.copyFileSync(DATA_FILE, DATA_FILE + '.corrupt.' + Date.now());
-        }
-        fs.writeFileSync(DATA_FILE, JSON.stringify(fresh, null, 2));
-      } catch (_) {}
-      warnIfStoreOversized(DATA_FILE, fresh);
-      return fresh;
-    }
-  }
-
-  function writeStore(store) {
-    ensureDataFile();
-    rotateStoreBackups();
-    const tmp = DATA_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
-    fs.renameSync(tmp, DATA_FILE);
-    // Bump mtime to the next whole second so If-Modified-Since (which carries
-    // 1s-resolution HTTP-date) can distinguish "changed in the same second"
-    // from "not changed". Without this, two writes within the same second
-    // both report mtimeSec === sinceSec and a real mutation could be hidden.
-    const next = Math.floor(Date.now() / 1000) + 1;
-    try {
-      fs.utimesSync(DATA_FILE, next, next);
-    } catch (_) { /* best-effort; stat will use rename mtime as fallback */ }
-  }
-
-  function operationStore(store) {
-    if (!Array.isArray(store.operations)) store.operations = [];
-    return store.operations;
-  }
-
-  return { emptyStore, ensureDataFile, backupPath, rotateStoreBackups,
-    tryLoadStoreFrom, readStore, writeStore, operationStore,
-    DATA_FILE };
 }
 
-module.exports = { create };
+/**
+ * Create a store API bound to `dataFile`. Returns the same method surface
+ * every prior version of store.js exported, so callers do not need to change.
+ */
+function create({ dataFile, backendHint }) {
+  const backend = selectBackend({ dataFile, backendHint });
+  return {
+    emptyStore:        backend.emptyStore.bind(backend),
+    ensureDataFile:   backend.ensureDataFile.bind(backend),
+    backupPath:       backend.backupPath.bind(backend),
+    rotateStoreBackups: backend.rotateStoreBackups.bind(backend),
+    tryLoadStoreFrom: backend.tryLoadStoreFrom.bind(backend),
+    readStore:        backend.readStore.bind(backend),
+    writeStore:       backend.writeStore.bind(backend),
+    operationStore:   backend.operationStore.bind(backend),
+    DATA_FILE:        backend.DATA_FILE,
+    _backend:         backend  // exposed for tests / introspection only
+  };
+}
+
+module.exports = { create, selectBackend, JsonFileBackend };

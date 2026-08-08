@@ -37,11 +37,23 @@ public class SyncClient {
     }
 
     public SyncResult fetchSnapshot() {
+        return fetchSnapshot(null);
+    }
+
+    /** H2: snapshot optionally carries the calling device_id so the server
+     *  filters out notices addressed to other devices. */
+    public SyncResult fetchSnapshot(String deviceId) {
         if (DateUtils.isEmpty(baseUrl)) return SyncResult.fail("尚未配置同步地址。", "missing base url");
         HttpURLConnection conn = null;
         try {
-            Log.i(TAG, "GET " + baseUrl + "/v1/tasks/snapshot");
-            conn = open("/v1/tasks/snapshot", "GET");
+            String path = "/v1/tasks/snapshot";
+            if (!DateUtils.isEmpty(deviceId)) {
+                // device_id is set by SettingsActivity; pushes it as a query
+                // param so the server can route per-device notices.
+                path += "?device_id=" + java.net.URLEncoder.encode(deviceId, "UTF-8");
+            }
+            Log.i(TAG, "GET " + baseUrl + path);
+            conn = open(path, "GET");
             int code = conn.getResponseCode();
             Log.i(TAG, "snapshot response code=" + code);
             String body = readResponse(conn, code);
@@ -52,10 +64,39 @@ public class SyncClient {
             result.httpStatus = code;
             result.serverTime = snapshot.serverTime;
             result.tasks = snapshot.tasks;
+            result.notices = snapshot.notices != null ? snapshot.notices : new java.util.ArrayList<dev.inkqueue.data.AgentNotice>();
             return result;
         } catch (Exception e) {
             Log.w(TAG, "fetch snapshot failed", e);
             return SyncResult.fail("同步失败，显示本地内容", e.toString());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /** H2: dismiss an agent notice so it stops re-appearing on subsequent
+     *  syncs. Returns true if the POST succeeded with 2xx. Best-effort: the
+     *  local UI can pre-emptively remove the notice and tolerate the rare
+     *  case where the server still has it (it'll just resurface next sync). */
+    public boolean dismissNotice(String noticeId, String deviceId) {
+        if (DateUtils.isEmpty(baseUrl) || DateUtils.isEmpty(noticeId)) return false;
+        HttpURLConnection conn = null;
+        try {
+            String path = "/v1/notices/" + java.net.URLEncoder.encode(noticeId, "UTF-8") + "/dismiss";
+            conn = open(path, "POST");
+            JSONObject body = new JSONObject();
+            body.put("device_id", DateUtils.isEmpty(deviceId) ? "kindle-pw3" : deviceId);
+            Log.i(TAG, "POST " + baseUrl + path + " device=" + body.optString("device_id"));
+            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(conn.getOutputStream(), "UTF-8"));
+            writer.write(body.toString());
+            writer.flush();
+            writer.close();
+            int code = conn.getResponseCode();
+            Log.i(TAG, "dismiss response code=" + code);
+            return code >= 200 && code < 300;
+        } catch (Exception e) {
+            Log.w(TAG, "dismissNotice failed for " + noticeId, e);
+            return false;
         } finally {
             if (conn != null) conn.disconnect();
         }

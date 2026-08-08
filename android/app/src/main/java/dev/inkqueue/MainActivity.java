@@ -12,9 +12,11 @@ import android.os.PowerManager;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Toast;
+import dev.inkqueue.data.AgentNotice;
 import dev.inkqueue.data.Task;
 import dev.inkqueue.data.TaskRepository;
 import dev.inkqueue.data.OperationQueue;
+import dev.inkqueue.sync.SyncClient;
 import dev.inkqueue.sync.SyncResult;
 import dev.inkqueue.sync.SyncScheduler;
 import dev.inkqueue.sync.SyncService;
@@ -291,8 +293,84 @@ public class MainActivity extends Activity implements InkMainView.Listener {
                         Toast.makeText(MainActivity.this, result.userMessage, Toast.LENGTH_SHORT).show();
                     }
                 }
+                // H2 reverse-notify: if the server pushed notices addressed to
+                // this device, surface them as a small stacked AlertDialog chain.
+                // Each "知道了" tap fires dismissNotice() in the background; the
+                // server then drops the notice from the next snapshot.
+                if (result != null && result.success && result.notices != null && !result.notices.isEmpty()) {
+                    showAgentNotices(result.notices, 0);
+                }
             }
         }.execute();
+    }
+
+    /** H2: show notices one after another in a minimal AlertDialog. Tapping
+     *  "知道了" pre-emptively removes the notice from the device's UI and
+     *  POSTs /v1/notices/:id/dismiss so it stops relaying on future syncs. */
+    private void showAgentNotices(final java.util.List<AgentNotice> notices, final int index) {
+        if (index >= notices.size()) return;
+        if (isFinishing()) return;
+        final AgentNotice n = notices.get(index);
+        String kind = n.kind;
+        if (DateUtils.isEmpty(kind)) kind = "info";
+        String titleTag;
+        if ("warn".equals(kind))       titleTag = "提醒 · 警告";
+        else if ("remind".equals(kind)) titleTag = "提醒 · 待办";
+        else                            titleTag = "来自 Agent";
+
+        StringBuilder body = new StringBuilder();
+        body.append(n.title == null ? "" : n.title);
+        if (!DateUtils.isEmpty(n.body)) {
+            body.append("\n\n").append(n.body);
+        }
+        if (!DateUtils.isEmpty(n.createdAt)) {
+            // createdAt is ISO8601 with TZ; trim to YYYY-MM-DD HH:MM for legibility.
+            String shortTs = n.createdAt.length() >= 16 ? n.createdAt.substring(0, 16).replace('T', ' ') : n.createdAt;
+            body.append("\n\n— ").append(shortTs);
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(titleTag)
+                .setMessage(body.toString())
+                .setPositiveButton("知道了", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int which) {
+                        // Pre-emptive local "seen" — there is no local notice
+                        // persistence; the dismiss simply tells the server.
+                        final String deviceId = prefDeviceId();
+                        final String noticeId = n.id;
+                        new AsyncTask<Void, Void, Void>() {
+                            @Override protected Void doInBackground(Void... v) {
+                                try {
+                                    SyncClient client = new SyncClient(prefBaseUrl(), prefToken());
+                                    client.dismissNotice(noticeId, deviceId);
+                                } catch (Exception e) {
+                                    android.util.Log.w("InkQueueNotice", "dismiss failed: " + e);
+                                }
+                                return null;
+                            }
+                        }.execute();
+                        // Chain to next notice if any.
+                        showAgentNotices(notices, index + 1);
+                    }
+                })
+                .setCancelable(false)
+                .create();
+        dialog.show();
+    }
+
+    /** H2: pull base_url + token + device_id from the same prefs SettingsActivity uses.
+     *  Renamed to avoid colliding with Context.getDeviceId() on recent SDKs. */
+    private String prefBaseUrl() {
+        return getSharedPreferences("inkqueue", MODE_PRIVATE)
+                .getString("base_url", "http://192.168.1.100:8787");
+    }
+    private String prefToken() {
+        return getSharedPreferences("inkqueue", MODE_PRIVATE)
+                .getString("token", "dev-token");
+    }
+    private String prefDeviceId() {
+        return getSharedPreferences("inkqueue", MODE_PRIVATE)
+                .getString("device_id", "kindle-pw3");
     }
 
     private void completeTaskFromList(String taskId) {

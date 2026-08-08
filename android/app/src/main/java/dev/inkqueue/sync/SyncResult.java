@@ -1,5 +1,6 @@
 package dev.inkqueue.sync;
 
+import dev.inkqueue.data.AgentNotice;
 import dev.inkqueue.data.Task;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,6 +12,7 @@ public class SyncResult {
     public String userMessage;
     public String technicalMessage;
     public List<Task> tasks = new ArrayList<Task>();
+    public List<AgentNotice> notices = new ArrayList<AgentNotice>();
     public List<String> accepted = new ArrayList<String>();
     public List<String> ignored = new ArrayList<String>();
     public List<String> errors = new ArrayList<String>();

@@ -158,7 +158,7 @@ public class SyncService {
                     + " ignored=" + opsIgnored + " failed=" + opsFailed);
         }
 
-        SyncResult snapshot = client.fetchSnapshot();
+        SyncResult snapshot = client.fetchSnapshot(deviceId);
         if (!snapshot.success) {
             // One quiet retry for transient network blips (Kindle Wi-Fi is flaky).
             Log.w(TAG, "snapshot failed once: " + snapshot.technicalMessage + " — retrying");
@@ -167,7 +167,7 @@ public class SyncService {
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
             }
-            snapshot = client.fetchSnapshot();
+            snapshot = client.fetchSnapshot(deviceId);
         }
         if (!snapshot.success) {
             // Ops may already be on the server. Be honest about partial success.

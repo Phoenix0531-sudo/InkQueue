@@ -1,5 +1,6 @@
 package dev.inkqueue.util;
 
+import dev.inkqueue.data.AgentNotice;
 import dev.inkqueue.data.Task;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +22,15 @@ public final class JsonUtils {
                 snapshot.tasks.add(Task.fromJson(array.getJSONObject(i)));
             }
         }
+        // H2 reverse-notify: optional agent_notices array; absent on older
+        // servers → treated as "no notices" and never shown.
+        snapshot.notices = new ArrayList<AgentNotice>();
+        JSONArray notices = root.optJSONArray("agent_notices");
+        if (notices != null) {
+            for (int i = 0; i < notices.length(); i++) {
+                snapshot.notices.add(AgentNotice.fromJson(notices.getJSONObject(i)));
+            }
+        }
         return snapshot;
     }
 
@@ -33,5 +43,6 @@ public final class JsonUtils {
     public static class Snapshot {
         public String serverTime;
         public List<Task> tasks;
+        public List<AgentNotice> notices;
     }
 }
