@@ -80,6 +80,16 @@ node agent/inkq.js events --limit 30
 node agent/inkq.js context   # 附带 chronic_postpone[] + rules
 ```
 
+### 设备审计（`--device`）
+
+每条 complete/postpone 事件都带 `device_id`（Kindle 上传时来自 SettingsActivity 的 `device_id`；CLI 写入默认 `agent-cli`）。按设备过滤查历史：
+
+```bash
+node agent/inkq.js events --device kindle-pw3 --limit 30
+```
+
+用途：排查"Kindle 上点了完成但任务没归档"这类疑案时，先看设备侧 vs agent-cli 侧各做了什么，再对照 snapshot。事件历史不随任务归档删除——archived 任务的完成/推迟记录保留可审。
+
 `context` 在可用时会附带 `chronic_postpone` 列表；看到后**禁止**对该 id 只改 due。
 
 `events` 响应同时含 raw `events` 与派生 `signals`（`task_completed` / `postponed` / `chronic_postpone`）。优先看 `signals` 再决定是否 add/改 due；`chronic_postpone` 出现时禁止无脑再 postpone。
