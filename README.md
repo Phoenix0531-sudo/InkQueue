@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.7 · minSdk 19 · ~60 KB APK · 49 server + 35 JVM + 25 agent tests · CI · H1+H2 shipped">
+  <img src="./assets/readme/badges.svg" width="100%" alt="v0.9.8 · minSdk 19 · ~60 KB APK · 49 server + 35 JVM + 25 agent tests · CI · H1+H2+H4 shipped">
 </p>
 
 
@@ -21,7 +21,7 @@ Agent writes the queue in conversation. Kindle only views, completes, and postpo
 | **Client** | Native Java · Canvas self-draw · minSdk 19 · zero AndroidX · ~55 KB APK |
 | **Server** | Node reference API on port `8787` · JSON file store · optional TLS |
 | **Agent path** | `node agent/inkq.js` + [`agent/interface.md`](agent/interface.md) · MCP optional |
-| **Status** | **v0.9.7** · 49 server + 35 Android JVM + 25 agent tests · CI · H1 StoreBackend + H2 reverse-notify · B1 on real PW3 |
+| **Status** | **v0.9.8** · 49 server + 35 Android JVM + 25 agent tests · CI · H1 StoreBackend + H2 reverse-notify + H4 device probe · B1 on real PW3 |
 
 Home-screen name on device: **任务**.
 
@@ -246,7 +246,7 @@ curl -s -H "X-InkQueue-Token: dev-token" http://127.0.0.1:8787/v1/tasks/snapshot
 
 ## Features (v0.9.7)
 
-Installed on device as `versionName 0.9.7` / `versionCode 96` (startup prune + `dropDeadPendingOperations` + background AlarmManager sync with configurable interval + H2 reverse-notice AlertDialog).
+Installed on device as `versionName 0.9.8` / `versionCode 97` (startup prune + `dropDeadPendingOperations` + background AlarmManager sync with configurable interval + H2 reverse-notice AlertDialog + adb intent extras bootstrap).
 
 **Kindle**
 
@@ -337,6 +337,25 @@ Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_
 
 ---
 
+## Real-device verification status
+
+Tested on a USB-attached Kindle Paperwhite 3 running KOSP `4.0-rc2`
+(fingerprint `Freescale/kindlemod/...4.0-rc2/20151130:user/dev-keys`).
+
+| Area | Status | Evidence |
+|---|---|---|
+| APK install | ✅ `versionCode 97` (v0.9.8, 60,853 B) installs clean on Android 4.4.2 | `adb install -r app-debug.apk` → `Success`; `dumpsys package dev.inkqueue` shows `versionCode=97 targetSdk=35` |
+| Canvas UI launch | ✅ `MainActivity` renders on first launch | `dumpsys window` → `mCurrentFocus=Window{... dev.inkqueue/dev.inkqueue.MainActivity}` |
+| Always-on mode | ✅ Wake-lock + dim brightness applied | Logcat: `I/InkQueue: always-on mode on` |
+| KOSP EPDC partial API (H4) | ❌ **No usable vendor path on this ROM** | Live probe (`docs/research/kosp-eink-api-probe.md`): `/dev/graphics/fb0` is `0660 system:graphics` (user apps get `EACCES`); waveform table has no `a2`; `epdc_ctl` sysfs not present; KOSP `Eink.apk` is a 68 KB config editor with no ioctl hook. **The v0.9.7 "consider ioctl" roadmap item is dropped** — the framework-mediated redraw (current path) is the only viable approach on stock 4.4. |
+| Wi-Fi ↔ sync (H2 closed-loop) | ⚠️ **Blocked at Windows Defender Firewall** | Kindle ↔ gateway `[IP]`: 0% loss; Kindle ↔ host `[IPv4]` on wlan: 100% loss; host → Kindle: reachable. PowerShell echo on `[IP]:8787` accepts nothing. `SyncClient.fetchSnapshot` returns `ECONNREFUSED` after ~650 ms (ICMP-unreachable fast reject, not a timeout). Fix: add an inbound firewall rule allowing TCP 8787 from `192.168.10.0/24` (one-time, needs admin UAC — see `docs/development.md` "Firewall"). The APK and server are correct; the block is environmental. |
+
+`adb reverse` (which would let the device reach a host port over USB
+without Wi-Fi) is **not supported** by the KOSP build of adbd on Android
+4.4.2 — `adb reverse tcp:8787 tcp:8787` returns `error: closed`.
+
+---
+
 ## Roadmap
 
 **Shipped**
@@ -349,6 +368,7 @@ Env knobs: `INKQUEUE_MAX_OPERATIONS`, `INKQUEUE_OPERATIONS_TTL_DAYS`, `INKQUEUE_
 - **v0.9.4**: startup auto-prune (server cleans before serving), Android parses `pruned` + masthead 「服务端清理 N 条」, TTL/startup prune tests, postOperations end-to-end test, (`versionCode 94`)
 - **v0.9.5**: triage `--suggest-split` (chronic 首选拆分执行而非整块推迟) + `--split-parts N` + 6 plan/apply 单测, Kindle 后台同步 (AlarmManager ELAPSED_REALTIME_WAKEUP + inexact repeating + SyncTickReceiver partial wake-lock ≤20s, Settings 后台同步 interval 1/5/15/30 min / 关闭), server `If-Modified-Since` 304 省电 + Last-Modified 头 + writeStore mtime bump to next whole second, TLS HTTPS 端到端真跑验通 (自签证书 + `INKQUEUE_TLS_KEY/CERT` 直接 HTTPS + Caddy 反代 + Kindle 4.4 自签 CA 导入文档), (`versionCode 95`)
 - **v0.9.7**: GitHub Actions CI (server + agent + Android JVM + assemble APK artifact), H1 StoreBackend abstraction layer (JsonFileBackend default + D1/Sqlite stub + factory entry anchor selection mechanism + 3 backend unit tests), H2 reverse-notify via snapshot (POST /v1/agent/notices + POST /v1/notices/:id/dismiss + snapshot agent_notices per-device/broadcast + 5 unit tests + AgentNotice.java + AlertDialog chained dismiss + SyncClient.fetchSnapshot(deviceId)), force-chronic cleanup, device_id audit (M1), store size guard INKQUEUE_MAX_STORE_BYTES (M3), (`versionCode 96`)
+- **v0.9.8**: MainActivity accepts `am start --es api_base_url/api_token/device_id` extras (no e-ink typing to bootstrap sync); H4 device-side live probe of KOSP EPDC API on USB-attached PW3 — **rejected** every static hypothesis (no `a2` waveform on this build, `/dev/graphics/fb0` perms block `MXCFB_SEND_UPDATE` ioctl from non-system apps, `epdc_ctl` sysfs dead path, KOSP `Eink.apk` is a config editor not a refresh bridge), see [`docs/research/kosp-eink-api-probe.md`](docs/research/kosp-eink-api-probe.md); (`versionCode 97`)
 
 **Not in scope (separate products)**
 
